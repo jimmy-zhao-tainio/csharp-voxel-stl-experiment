@@ -98,4 +98,51 @@ public class KernelTests
         Assert.True(sparseBytes.Length >= 7);
         Assert.Equal(1, sparseBytes[6]); // encoding slot
     }
+
+    [Fact]
+    public void RotateRevoxelized_WatertightWithObb()
+    {
+        var solid = VoxelKernel.CreateEmpty();
+        VoxelKernel.AddBox(solid, new Int3(0, 0, 0), new Int3(20, 10, 4));
+
+        Assert.True(VoxelKernel.IsWatertight(solid));
+
+        var options = new RotateOptions
+        {
+            Axis = Axis.Z,
+            Degrees = 30.0,
+            Pivot = new Int3(0, 0, 0),
+            ConservativeObb = true,
+            Epsilon = 1e-8
+        };
+
+        var rotated = VoxelKernel.RotateRevoxelized(solid, options);
+
+        Assert.True(VoxelKernel.IsWatertight(rotated));
+        Assert.NotEqual(0, VoxelKernel.GetVolume(rotated));
+    }
+
+    [Fact]
+    public void RotateRevoxelized_WatertightWithSupersampling()
+    {
+        var solid = VoxelKernel.CreateEmpty();
+        VoxelKernel.AddBox(solid, new Int3(0, 0, 0), new Int3(20, 10, 4));
+
+        Assert.True(VoxelKernel.IsWatertight(solid));
+
+        var options = new RotateOptions
+        {
+            Axis = Axis.Z,
+            Degrees = 30.0,
+            Pivot = new Int3(0, 0, 0),
+            ConservativeObb = false,
+            SamplesPerAxis = 4,
+            Epsilon = 1e-8
+        };
+
+        var rotated = VoxelKernel.RotateRevoxelized(solid, options);
+
+        Assert.True(VoxelKernel.IsWatertight(rotated));
+        Assert.NotEqual(0, VoxelKernel.GetVolume(rotated));
+    }
 }

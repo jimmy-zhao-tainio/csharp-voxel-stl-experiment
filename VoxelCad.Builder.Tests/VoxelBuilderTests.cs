@@ -47,4 +47,53 @@ public class VoxelBuilderTests
         Assert.Equal(4, VoxelKernel.GetVolume(solid));
         Assert.True(VoxelKernel.IsWatertight(solid));
     }
+
+    [Fact]
+    public void RotateAny_SubtractedPatternIsWatertight()
+    {
+        var panel = new VoxelBuilder()
+            .Box(new Int3(0, 0, 0), new Int3(60, 60, 4))
+            .Subtract(b =>
+                b.RotateAny(Axis.Z, 30.0, HolePattern))
+            .Build();
+
+        Assert.True(VoxelKernel.IsWatertight(panel));
+        Assert.NotEqual(0, VoxelKernel.GetVolume(panel));
+    }
+
+    [Fact]
+    public void RotateAnyWith_SupersampleStaysWatertight()
+    {
+        var obb = new VoxelBuilder()
+            .Box(new Int3(0, 0, 0), new Int3(60, 60, 4))
+            .Subtract(b => b.RotateAny(Axis.Z, 30.0, HolePattern))
+            .Build();
+
+        var options = new RotateOptions
+        {
+            Pivot = new Int3(0, 0, 0),
+            ConservativeObb = false,
+            SamplesPerAxis = 5,
+            Epsilon = 1e-8
+        };
+
+        var supersampled = new VoxelBuilder()
+            .Box(new Int3(0, 0, 0), new Int3(60, 60, 4))
+            .Subtract(b => b.RotateAnyWith(Axis.Z, 30.0, options, HolePattern))
+            .Build();
+
+        Assert.True(VoxelKernel.IsWatertight(obb));
+        Assert.True(VoxelKernel.IsWatertight(supersampled));
+        Assert.NotEqual(0, VoxelKernel.GetVolume(obb));
+        Assert.NotEqual(0, VoxelKernel.GetVolume(supersampled));
+    }
+
+    private static void HolePattern(VoxelBuilder pattern)
+    {
+        pattern.Box(new Int3(5, 5, 0), new Int3(15, 25, 4));
+        pattern.Place(new Int3(20, 0, 0), inner =>
+        {
+            inner.Box(new Int3(5, 5, 0), new Int3(15, 25, 4));
+        });
+    }
 }

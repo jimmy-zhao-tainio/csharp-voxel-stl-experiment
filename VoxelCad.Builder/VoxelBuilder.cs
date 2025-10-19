@@ -189,6 +189,39 @@ public sealed class VoxelBuilder
         return this;
     }
 
+    public VoxelBuilder RotateAny(Axis axis, double degrees, Action<VoxelBuilder> scope)
+    {
+        var options = new RotateOptions
+        {
+            Axis = axis,
+            Degrees = degrees,
+            Pivot = new Int3(0, 0, 0),
+            ConservativeObb = true
+        };
+
+        return RotateAnyInternal(options, scope);
+    }
+
+    public VoxelBuilder RotateAnyAround(Axis axis, double degrees, Int3 pivot, Action<VoxelBuilder> scope)
+    {
+        var options = new RotateOptions
+        {
+            Axis = axis,
+            Degrees = degrees,
+            Pivot = pivot,
+            ConservativeObb = true
+        };
+
+        return RotateAnyInternal(options, scope);
+    }
+
+    public VoxelBuilder RotateAnyWith(Axis axis, double degrees, RotateOptions options, Action<VoxelBuilder> scope)
+    {
+        options.Axis = axis;
+        options.Degrees = degrees;
+        return RotateAnyInternal(options, scope);
+    }
+
     private void ApplyTransformed(VoxelSolid temp, bool subtract)
     {
         var transformed = ApplyTransform(temp, _currentTransforms);
@@ -209,6 +242,17 @@ public sealed class VoxelBuilder
         var child = new VoxelBuilder(_currentTransforms);
         scope(child);
         return child.Build();
+    }
+
+    private VoxelBuilder RotateAnyInternal(RotateOptions options, Action<VoxelBuilder> scope)
+    {
+        if (scope is null) throw new ArgumentNullException(nameof(scope));
+
+        var child = RunChild(scope);
+        var rotated = VoxelKernel.RotateRevoxelized(child, options);
+        var merged = VoxelKernel.Union(_solid, rotated);
+        CopyInto(_solid, merged);
+        return this;
     }
 
     private void WithTransform(List<TransformOp> next, Action<VoxelBuilder> scope)

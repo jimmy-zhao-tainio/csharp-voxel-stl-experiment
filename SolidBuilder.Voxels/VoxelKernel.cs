@@ -58,6 +58,16 @@ public struct FaceKey : IEquatable<FaceKey>
     public override string ToString() => $"{Axis}({K}; {A}, {B})";
 }
 
+public struct RotateOptions
+{
+    public Axis Axis { get; set; }
+    public double Degrees { get; set; }
+    public Int3 Pivot { get; set; }
+    public bool ConservativeObb { get; set; }
+    public int SamplesPerAxis { get; set; }
+    public double Epsilon { get; set; }
+}
+
 public class VoxelSolid
 {
     public HashSet<Int3> Voxels { get; }
@@ -386,6 +396,106 @@ public static class VoxelKernel
                 Axis.Z => new Int3(cell.X, cell.Y, -cell.Z - 1),
                 _ => cell
             });
+        }
+
+        return result;
+    }
+
+    public static VoxelSolid RotateRevoxelized(VoxelSolid src, RotateOptions options)
+    {
+        if (src is null)
+        {
+            throw new ArgumentNullException(nameof(src));
+        }
+
+        if (src.Voxels.Count == 0)
+        {
+            return CreateEmpty();
+        }
+
+        var epsilon = options.Epsilon > 0 ? options.Epsilon : 1e-9;
+        var samplesPerAxis = options.SamplesPerAxis > 0 ? options.SamplesPerAxis : 3;
+
+        var radians = options.Degrees * Math.PI / 180.0;
+        var rotation = BuildRotationMatrix(options.Axis, radians);
+        var inverse = Transpose(rotation);
+
+        var pivot = new Vector3d(options.Pivot.X, options.Pivot.Y, options.Pivot.Z);
+
+        var (srcMin, srcMaxExclusive) = GetBounds(src);
+        var expandedMin = new Vector3d(srcMin.X - 1, srcMin.Y - 1, srcMin.Z - 1);
+        var expandedMax = new Vector3d(srcMaxExclusive.X + 1, srcMaxExclusive.Y + 1, srcMaxExclusive.Z + 1);
+
+        double minX = double.MaxValue;
+        double minY = double.MaxValue;
+        double minZ = double.MaxValue;
+        double maxX = double.MinValue;
+        double maxY = double.MinValue;
+        double maxZ = double.MinValue;
+
+        for (var ix = 0; ix < 2; ix++)
+        {
+            var x = ix == 0 ? expandedMin.X : expandedMax.X;
+            for (var iy = 0; iy < 2; iy++)
+            {
+                var y = iy == 0 ? expandedMin.Y : expandedMax.Y;
+                for (var iz = 0; iz < 2; iz++)
+                {
+                    var z = iz == 0 ? expandedMin.Z : expandedMax.Z;
+                    var corner = new Vector3d(x, y, z);
+                    var rotated = RotateAroundPivot(corner, pivot, rotation);
+                    if (rotated.X < minX) minX = rotated.X;
+                    if (rotated.Y < minY) minY = rotated.Y;
+                    if (rotated.Z < minZ) minZ = rotated.Z;
+                    if (rotated.X > maxX) maxX = rotated.X;
+                    if (rotated.Y > maxY) maxY = rotated.Y;
+                    if (rotated.Z > maxZ) maxZ = rotated.Z;
+                }
+            }
+        }
+
+        var targetMinX = (int)Math.Floor(minX - epsilon);
+        var targetMinY = (int)Math.Floor(minY - epsilon);
+        var targetMinZ = (int)Math.Floor(minZ - epsilon);
+        var targetMaxX = (int)Math.Ceiling(maxX + epsilon);
+        var targetMaxY = (int)Math.Ceiling(maxY + epsilon);
+        var targetMaxZ = (int)Math.Ceiling(maxZ + epsilon);
+
+        var result = CreateEmpty();
+
+        var axisX = new Vector3d(inverse[0, 0], inverse[1, 0], inverse[2, 0]);
+        var axisY = new Vector3d(inverse[0, 1], inverse[1, 1], inverse[2, 1]);
+        var axisZ = new Vector3d(inverse[0, 2], inverse[1, 2], inverse[2, 2]);
+        var axes = new[] { axisX, axisY, axisZ };
+        const double halfSize = 0.5;
+        var extent = new Vector3d(
+            halfSize * (Math.Abs(axisX.X) + Math.Abs(axisY.X) + Math.Abs(axisZ.X)),
+            halfSize * (Math.Abs(axisX.Y) + Math.Abs(axisY.Y) + Math.Abs(axisZ.Y)),
+            halfSize * (Math.Abs(axisX.Z) + Math.Abs(axisY.Z) + Math.Abs(axisZ.Z)));
+
+        for (var z = targetMinZ; z < targetMaxZ; z++)
+        {
+            for (var y = targetMinY; y < targetMaxY; y++)
+            {
+                for (var x = targetMinX; x < targetMaxX; x++)
+                {
+                    var cell = new Int3(x, y, z);
+                    bool filled;
+                    if (options.ConservativeObb)
+                    {
+                        filled = CellFilledByObb(src, cell, pivot, inverse, axes, extent, halfSize, epsilon);
+                    }
+                    else
+                    {
+                        filled = CellFilledBySupersampling(src, cell, pivot, inverse, samplesPerAxis, epsilon);
+                    }
+
+                    if (filled)
+                    {
+                        AddVoxel(result, cell);
+                    }
+                }
+            }
         }
 
         return result;
@@ -922,6 +1032,267 @@ public static class VoxelKernel
         }
 
         return value;
+    }
+
+    private static double[,] BuildRotationMatrix(Axis axis, double radians)
+    {
+        var cos = Math.Cos(radians);
+        var sin = Math.Sin(radians);
+        var matrix = new double[3, 3];
+        switch (axis)
+        {
+            case Axis.X:
+                matrix[0, 0] = 1;
+                matrix[1, 1] = cos;
+                matrix[1, 2] = -sin;
+                matrix[2, 1] = sin;
+                matrix[2, 2] = cos;
+                break;
+            case Axis.Y:
+                matrix[0, 0] = cos;
+                matrix[0, 2] = sin;
+                matrix[1, 1] = 1;
+                matrix[2, 0] = -sin;
+                matrix[2, 2] = cos;
+                break;
+            case Axis.Z:
+                matrix[0, 0] = cos;
+                matrix[0, 1] = -sin;
+                matrix[1, 0] = sin;
+                matrix[1, 1] = cos;
+                matrix[2, 2] = 1;
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(axis), axis, null);
+        }
+
+        return matrix;
+    }
+
+    private static double[,] Transpose(double[,] matrix)
+    {
+        var result = new double[3, 3];
+        for (var i = 0; i < 3; i++)
+        {
+            for (var j = 0; j < 3; j++)
+            {
+                result[i, j] = matrix[j, i];
+            }
+        }
+
+        return result;
+    }
+
+    private static Vector3d RotateAroundPivot(Vector3d point, Vector3d pivot, double[,] matrix)
+    {
+        var dx = point.X - pivot.X;
+        var dy = point.Y - pivot.Y;
+        var dz = point.Z - pivot.Z;
+
+        var rx = matrix[0, 0] * dx + matrix[0, 1] * dy + matrix[0, 2] * dz;
+        var ry = matrix[1, 0] * dx + matrix[1, 1] * dy + matrix[1, 2] * dz;
+        var rz = matrix[2, 0] * dx + matrix[2, 1] * dy + matrix[2, 2] * dz;
+
+        return new Vector3d(pivot.X + rx, pivot.Y + ry, pivot.Z + rz);
+    }
+
+    private static bool CellFilledBySupersampling(VoxelSolid src, Int3 target, Vector3d pivot, double[,] inverse, int samplesPerAxis, double epsilon)
+    {
+        for (var sx = 0; sx < samplesPerAxis; sx++)
+        {
+            var offsetX = (sx + 0.5) / samplesPerAxis;
+            for (var sy = 0; sy < samplesPerAxis; sy++)
+            {
+                var offsetY = (sy + 0.5) / samplesPerAxis;
+                for (var sz = 0; sz < samplesPerAxis; sz++)
+                {
+                    var offsetZ = (sz + 0.5) / samplesPerAxis;
+                    var sampleTarget = new Vector3d(target.X + offsetX, target.Y + offsetY, target.Z + offsetZ);
+                    var mapped = RotateAroundPivot(sampleTarget, pivot, inverse);
+
+                    var cellX = FloorWithTolerance(mapped.X, epsilon);
+                    var cellY = FloorWithTolerance(mapped.Y, epsilon);
+                    var cellZ = FloorWithTolerance(mapped.Z, epsilon);
+                    var candidate = new Int3(cellX, cellY, cellZ);
+
+                    if (!src.Voxels.Contains(candidate))
+                    {
+                        continue;
+                    }
+
+                    if (IsPointInsideVoxel(mapped, candidate, epsilon))
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static bool CellFilledByObb(VoxelSolid src, Int3 target, Vector3d pivot, double[,] inverse, IReadOnlyList<Vector3d> axes, Vector3d extent, double halfSize, double epsilon)
+    {
+        var centerTarget = new Vector3d(target.X + 0.5, target.Y + 0.5, target.Z + 0.5);
+        var centerSource = RotateAroundPivot(centerTarget, pivot, inverse);
+
+        var startX = (int)Math.Floor(centerSource.X - extent.X - epsilon);
+        var endX = (int)Math.Ceiling(centerSource.X + extent.X + epsilon);
+        var startY = (int)Math.Floor(centerSource.Y - extent.Y - epsilon);
+        var endY = (int)Math.Ceiling(centerSource.Y + extent.Y + epsilon);
+        var startZ = (int)Math.Floor(centerSource.Z - extent.Z - epsilon);
+        var endZ = (int)Math.Ceiling(centerSource.Z + extent.Z + epsilon);
+
+        for (var x = startX; x < endX; x++)
+        {
+            for (var y = startY; y < endY; y++)
+            {
+                for (var z = startZ; z < endZ; z++)
+                {
+                    var candidate = new Int3(x, y, z);
+                    if (!src.Voxels.Contains(candidate))
+                    {
+                        continue;
+                    }
+
+                    if (ObbIntersectsVoxel(centerSource, axes, halfSize, candidate, epsilon))
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static bool ObbIntersectsVoxel(Vector3d obbCenter, IReadOnlyList<Vector3d> axes, double halfSize, Int3 voxel, double epsilon)
+    {
+        var voxelCenter = new Vector3d(voxel.X + 0.5, voxel.Y + 0.5, voxel.Z + 0.5);
+        var tVec = new Vector3d(voxelCenter.X - obbCenter.X, voxelCenter.Y - obbCenter.Y, voxelCenter.Z - obbCenter.Z);
+
+        var tA = new[]
+        {
+            Vector3d.Dot(tVec, axes[0]),
+            Vector3d.Dot(tVec, axes[1]),
+            Vector3d.Dot(tVec, axes[2])
+        };
+
+        var rotation = new double[3, 3];
+        for (var i = 0; i < 3; i++)
+        {
+            rotation[i, 0] = axes[i].X;
+            rotation[i, 1] = axes[i].Y;
+            rotation[i, 2] = axes[i].Z;
+        }
+
+        var absR = new double[3, 3];
+        for (var i = 0; i < 3; i++)
+        {
+            for (var j = 0; j < 3; j++)
+            {
+                absR[i, j] = Math.Abs(rotation[i, j]) + epsilon;
+            }
+        }
+
+        var bExtents = 0.5;
+
+        // Test axes of the OBB.
+        for (var i = 0; i < 3; i++)
+        {
+            var ra = halfSize;
+            var rb = bExtents * (absR[i, 0] + absR[i, 1] + absR[i, 2]);
+            if (Math.Abs(tA[i]) > ra + rb)
+            {
+                return false;
+            }
+        }
+
+        // Test axes of the AABB (world axes).
+        var tWorld = tVec;
+        for (var j = 0; j < 3; j++)
+        {
+            var ra = halfSize * (absR[0, j] + absR[1, j] + absR[2, j]);
+            var rb = bExtents;
+            var axisComponent = j switch
+            {
+                0 => tWorld.X,
+                1 => tWorld.Y,
+                _ => tWorld.Z
+            };
+
+            if (Math.Abs(axisComponent) > ra + rb)
+            {
+                return false;
+            }
+        }
+
+        // Test cross products of the axes.
+        for (var i = 0; i < 3; i++)
+        {
+            for (var j = 0; j < 3; j++)
+            {
+                var ra = halfSize * (absR[(i + 1) % 3, j] + absR[(i + 2) % 3, j]);
+                var rb = bExtents * (absR[i, (j + 1) % 3] + absR[i, (j + 2) % 3]);
+                var term = Math.Abs(tA[(i + 2) % 3] * rotation[(i + 1) % 3, j] - tA[(i + 1) % 3] * rotation[(i + 2) % 3, j]);
+                if (term > ra + rb)
+                {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    private static bool IsPointInsideVoxel(Vector3d point, Int3 cell, double epsilon)
+    {
+        return point.X >= cell.X - epsilon && point.X < cell.X + 1 + epsilon &&
+               point.Y >= cell.Y - epsilon && point.Y < cell.Y + 1 + epsilon &&
+               point.Z >= cell.Z - epsilon && point.Z < cell.Z + 1 + epsilon;
+    }
+
+    private static int FloorWithTolerance(double value, double tolerance)
+    {
+        if (Math.Abs(value) < tolerance)
+        {
+            return 0;
+        }
+
+        double adjusted;
+        if (value >= 0)
+        {
+            adjusted = value >= tolerance ? value - tolerance : 0.0;
+        }
+        else
+        {
+            adjusted = value <= -tolerance ? value + tolerance : 0.0;
+        }
+
+        return (int)Math.Floor(adjusted);
+    }
+
+    private readonly struct Vector3d
+    {
+        public Vector3d(double x, double y, double z)
+        {
+            X = x;
+            Y = y;
+            Z = z;
+        }
+
+        public double X { get; }
+        public double Y { get; }
+        public double Z { get; }
+
+        public static Vector3d operator +(Vector3d left, Vector3d right) =>
+            new(left.X + right.X, left.Y + right.Y, left.Z + right.Z);
+
+        public static Vector3d operator -(Vector3d left, Vector3d right) =>
+            new(left.X - right.X, left.Y - right.Y, left.Z - right.Z);
+
+        public static double Dot(Vector3d left, Vector3d right) =>
+            left.X * right.X + left.Y * right.Y + left.Z * right.Z;
     }
 
     private static IEnumerable<(Int3 neighbor, FaceKey face)> EnumerateNeighborFaces(Int3 cell)
