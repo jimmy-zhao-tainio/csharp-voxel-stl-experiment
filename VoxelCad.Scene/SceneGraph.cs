@@ -26,6 +26,37 @@ public enum Role
     Intersect
 }
 
+public enum Metric
+{
+    LInf,
+    L1,
+    L2
+}
+
+public readonly struct AabbI
+{
+    public AabbI(Int3 min, Int3 max)
+    {
+        if (min.X >= max.X || min.Y >= max.Y || min.Z >= max.Z)
+        {
+            throw new ArgumentException("Invalid AABB bounds.");
+        }
+
+        Min = min;
+        Max = max;
+    }
+
+    public Int3 Min { get; }
+    public Int3 Max { get; }
+
+    public bool Contains(Int3 point)
+    {
+        return point.X >= Min.X && point.X < Max.X &&
+               point.Y >= Min.Y && point.Y < Max.Y &&
+               point.Z >= Min.Z && point.Z < Max.Z;
+    }
+}
+
 public sealed class FrameExact
 {
     public FrameExact()
@@ -251,6 +282,7 @@ public sealed class Instance
 
 public sealed class Scene
 {
+    private readonly List<Part> _parts = new();
     private readonly List<Instance> _instances = new();
 
     public Scene(ProjectSettings settings)
@@ -274,6 +306,19 @@ public sealed class Scene
         return instance;
     }
 
+    public bool RemoveInstance(Instance instance)
+    {
+        if (instance is null) throw new ArgumentNullException(nameof(instance));
+        return _instances.Remove(instance);
+    }
+
+    private Part RegisterPart(string name, VoxelSolid solid, Role defaultRole = Role.Solid)
+    {
+        var part = new Part(name, solid, defaultRole);
+        _parts.Add(part);
+        return part;
+    }
+
     public VoxelSolid Bake(BakeOptions? options = null)
     {
         var opts = options ?? BakeOptions.Default;
@@ -285,33 +330,7 @@ public sealed class Scene
 
         foreach (var instance in _instances)
         {
-            var solid = CloneSolid(instance.Part.Model);
-
-            if (voxelsPerUnit != baseScale)
-            {
-                solid = ResampleSolid(solid, baseScale, voxelsPerUnit);
-            }
-
-            if (instance.Exact is not null)
-            {
-                solid = ApplyExact(solid, instance.Exact);
-            }
-
-            if (instance.Any is FrameAny any)
-            {
-                var rotateOptions = revoxelization.CreateOptions(any.Axis, any.Degrees, any.Pivot);
-                if (any.SamplesPerAxis > 0)
-                {
-                    rotateOptions.SamplesPerAxis = any.SamplesPerAxis;
-                }
-
-                if (any.Epsilon > 0)
-                {
-                    rotateOptions.Epsilon = any.Epsilon;
-                }
-
-                solid = VoxelKernel.RotateRevoxelized(solid, rotateOptions);
-            }
+            var solid = BuildSolidForInstance(instance, revoxelization, baseScale, voxelsPerUnit);
 
             if (result is null)
             {
@@ -329,6 +348,102 @@ public sealed class Scene
         }
 
         return result ?? VoxelKernel.CreateEmpty();
+    }
+
+    public Part Weld(Instance a, Instance b, int? radius = null, Metric metric = Metric.LInf, bool replaceInstances = true, string? name = null)
+    {
+        if (a is null) throw new ArgumentNullException(nameof(a));
+        if (b is null) throw new ArgumentNullException(nameof(b));
+
+        var revo = Settings.Revoxelization;
+        var baseScale = Settings.VoxelsPerUnit;
+        var solidA = BuildSolidForInstance(a, revo, baseScale, baseScale);
+        var solidB = BuildSolidForInstance(b, revo, baseScale, baseScale);
+        var union = VoxelKernel.Union(solidA, solidB);
+
+        var closingRadius = radius ?? DetermineClosingRadius(union, solidA, solidB, metric);
+        var closed = closingRadius > 0 ? Close(union, closingRadius, metric) : union;
+
+        var partName = name ?? $"Weld({a.Part.Name},{b.Part.Name})";
+        var part = RegisterPart(partName, closed);
+
+        if (replaceInstances)
+        {
+            RemoveInstance(a);
+            RemoveInstance(b);
+            AddInstance(part, Role.Solid);
+        }
+
+        return part;
+    }
+
+    public Part BridgeAxis(Instance a, Instance b, Axis axis, int thickness = 1, AabbI? mask = null, string? name = null, bool addInstance = true)
+    {
+        if (a is null) throw new ArgumentNullException(nameof(a));
+        if (b is null) throw new ArgumentNullException(nameof(b));
+        if (thickness < 1) throw new ArgumentOutOfRangeException(nameof(thickness));
+
+        var revo = Settings.Revoxelization;
+        var baseScale = Settings.VoxelsPerUnit;
+        var solidA = BuildSolidForInstance(a, revo, baseScale, baseScale);
+        var solidB = BuildSolidForInstance(b, revo, baseScale, baseScale);
+
+        var bridge = BuildBridgePrism(solidA, solidB, axis, thickness, mask);
+        var combined = VoxelKernel.Union(VoxelKernel.Union(solidA, solidB), bridge);
+
+        var partName = name ?? $"Bridge({axis})";
+        var part = RegisterPart(partName, combined);
+
+        if (addInstance)
+        {
+            AddInstance(part, Role.Solid);
+        }
+
+        return part;
+    }
+
+    public Part Strut(Instance a, Instance b, int radius = 1, string? name = null, bool addInstance = true)
+    {
+        if (a is null) throw new ArgumentNullException(nameof(a));
+        if (b is null) throw new ArgumentNullException(nameof(b));
+        if (radius < 0) throw new ArgumentOutOfRangeException(nameof(radius));
+
+        var revo = Settings.Revoxelization;
+        var baseScale = Settings.VoxelsPerUnit;
+        var solidA = BuildSolidForInstance(a, revo, baseScale, baseScale);
+        var solidB = BuildSolidForInstance(b, revo, baseScale, baseScale);
+
+        var strut = BuildStrut(solidA, solidB, radius);
+        var combined = VoxelKernel.Union(VoxelKernel.Union(solidA, solidB), strut);
+
+        var partName = name ?? $"Strut({a.Part.Name},{b.Part.Name})";
+        var part = RegisterPart(partName, combined);
+
+        if (addInstance)
+        {
+            AddInstance(part, Role.Solid);
+        }
+
+        return part;
+    }
+
+    private VoxelSolid BuildSolidForInstance(Instance instance, RevoxelizationSettings revoxelization, int baseScale, int targetScale)
+    {
+        var solid = CloneSolid(instance.Part.Model);
+
+        if (targetScale != baseScale)
+        {
+            solid = ResampleSolid(solid, baseScale, targetScale);
+        }
+
+        solid = ApplyExact(solid, instance.Exact);
+
+        if (instance.Any is FrameAny any)
+        {
+            solid = ApplyAny(solid, any, revoxelization);
+        }
+
+        return solid;
     }
 
     private static VoxelSolid CloneSolid(VoxelSolid source)
@@ -357,6 +472,22 @@ public sealed class Scene
         var y = matrix[1, 0] * voxel.X + matrix[1, 1] * voxel.Y + matrix[1, 2] * voxel.Z;
         var z = matrix[2, 0] * voxel.X + matrix[2, 1] * voxel.Y + matrix[2, 2] * voxel.Z;
         return new Int3(x, y, z);
+    }
+
+    private static VoxelSolid ApplyAny(VoxelSolid solid, FrameAny any, RevoxelizationSettings settings)
+    {
+        var options = settings.CreateOptions(any.Axis, any.Degrees, any.Pivot);
+        if (any.SamplesPerAxis > 0)
+        {
+            options.SamplesPerAxis = any.SamplesPerAxis;
+        }
+
+        if (any.Epsilon > 0)
+        {
+            options.Epsilon = any.Epsilon;
+        }
+
+        return VoxelKernel.RotateRevoxelized(solid, options);
     }
 
     private static VoxelSolid ResampleSolid(VoxelSolid solid, int baseScale, int targetScale)
@@ -393,6 +524,500 @@ public sealed class Scene
         }
 
         return result;
+    }
+
+    private int DetermineClosingRadius(VoxelSolid union, VoxelSolid solidA, VoxelSolid solidB, Metric metric)
+    {
+        if (VoxelKernel.Is6Connected(union))
+        {
+            return 0;
+        }
+
+        var boundsA = VoxelKernel.GetBounds(solidA);
+        var boundsB = VoxelKernel.GetBounds(solidB);
+        var initial = GetChebyshevGap(boundsA, boundsB);
+        var high = Math.Max(1, initial);
+
+        var closed = Close(union, high, metric);
+        var safety = 0;
+        while (!VoxelKernel.Is6Connected(closed) && safety < 16)
+        {
+            high *= 2;
+            closed = Close(union, high, metric);
+            safety++;
+        }
+
+        if (!VoxelKernel.Is6Connected(closed))
+        {
+            return high;
+        }
+
+        var low = 1;
+        var best = high;
+        while (low <= high)
+        {
+            var mid = (low + high) / 2;
+            var candidate = Close(union, mid, metric);
+            if (VoxelKernel.Is6Connected(candidate))
+            {
+                best = mid;
+                high = mid - 1;
+            }
+            else
+            {
+                low = mid + 1;
+            }
+        }
+
+        return Math.Max(best, 1);
+    }
+
+    private static int GetChebyshevGap((Int3 min, Int3 maxExclusive) boundsA, (Int3 min, Int3 maxExclusive) boundsB)
+    {
+        var gapX = AxisGap(boundsA.min.X, boundsA.maxExclusive.X, boundsB.min.X, boundsB.maxExclusive.X);
+        var gapY = AxisGap(boundsA.min.Y, boundsA.maxExclusive.Y, boundsB.min.Y, boundsB.maxExclusive.Y);
+        var gapZ = AxisGap(boundsA.min.Z, boundsA.maxExclusive.Z, boundsB.min.Z, boundsB.maxExclusive.Z);
+        return Math.Max(gapX, Math.Max(gapY, gapZ));
+    }
+
+    private static int AxisGap(int minA, int maxA, int minB, int maxB)
+    {
+        if (maxA <= minB)
+        {
+            return minB - maxA;
+        }
+
+        if (maxB <= minA)
+        {
+            return minA - maxB;
+        }
+
+        return 0;
+    }
+
+    private static VoxelSolid Close(VoxelSolid solid, int radius, Metric metric)
+    {
+        if (radius <= 0)
+        {
+            return CloneSolid(solid);
+        }
+
+        var dilated = Dilate(solid, radius, metric);
+        return Erode(dilated, radius, metric);
+    }
+
+    private static VoxelSolid Dilate(VoxelSolid solid, int radius, Metric metric)
+    {
+        var result = VoxelKernel.CreateEmpty();
+        var offsets = BuildStructuringElement(radius, metric);
+
+        foreach (var voxel in solid.Voxels)
+        {
+            foreach (var offset in offsets)
+            {
+                VoxelKernel.AddVoxel(result, new Int3(voxel.X + offset.X, voxel.Y + offset.Y, voxel.Z + offset.Z));
+            }
+        }
+
+        return result;
+    }
+
+    private static VoxelSolid Erode(VoxelSolid solid, int radius, Metric metric)
+    {
+        var result = VoxelKernel.CreateEmpty();
+        var offsets = BuildStructuringElement(radius, metric);
+        var voxels = solid.Voxels;
+
+        foreach (var voxel in voxels)
+        {
+            var keep = true;
+            foreach (var offset in offsets)
+            {
+                var candidate = new Int3(voxel.X + offset.X, voxel.Y + offset.Y, voxel.Z + offset.Z);
+                if (!voxels.Contains(candidate))
+                {
+                    keep = false;
+                    break;
+                }
+            }
+
+            if (keep)
+            {
+                VoxelKernel.AddVoxel(result, voxel);
+            }
+        }
+
+        return result;
+    }
+
+    private static List<Int3> BuildStructuringElement(int radius, Metric metric)
+    {
+        var offsets = new List<Int3>();
+        if (radius <= 0)
+        {
+            offsets.Add(new Int3(0, 0, 0));
+            return offsets;
+        }
+
+        var radiusSquared = radius * radius;
+        for (var dx = -radius; dx <= radius; dx++)
+        {
+            for (var dy = -radius; dy <= radius; dy++)
+            {
+                for (var dz = -radius; dz <= radius; dz++)
+                {
+                    var include = metric switch
+                    {
+                        Metric.LInf => Math.Max(Math.Max(Math.Abs(dx), Math.Abs(dy)), Math.Abs(dz)) <= radius,
+                        Metric.L1 => Math.Abs(dx) + Math.Abs(dy) + Math.Abs(dz) <= radius,
+                        Metric.L2 => dx * dx + dy * dy + dz * dz <= radiusSquared,
+                        _ => true
+                    };
+
+                    if (include)
+                    {
+                        offsets.Add(new Int3(dx, dy, dz));
+                    }
+                }
+            }
+        }
+
+        return offsets;
+    }
+
+    private static VoxelSolid BuildBridgePrism(VoxelSolid solidA, VoxelSolid solidB, Axis axis, int thickness, AabbI? mask)
+    {
+        var projectionA = BuildProjection(solidA, axis);
+        var projectionB = BuildProjection(solidB, axis);
+        var footprint = new HashSet<(int, int)>(projectionA.Keys);
+        footprint.IntersectWith(projectionB.Keys);
+
+        var boundsA = VoxelKernel.GetBounds(solidA);
+        var boundsB = VoxelKernel.GetBounds(solidB);
+
+        if (footprint.Count == 0)
+        {
+            var firstAxis = GetFirstAxis(axis);
+            var secondAxis = GetSecondAxis(axis);
+            var range1 = OverlapRange(GetAxisRange(boundsA, firstAxis), GetAxisRange(boundsB, firstAxis));
+            var range2 = OverlapRange(GetAxisRange(boundsA, secondAxis), GetAxisRange(boundsB, secondAxis));
+
+            for (var i = range1.min; i < range1.max; i++)
+            {
+                for (var j = range2.min; j < range2.max; j++)
+                {
+                    footprint.Add((i, j));
+                }
+            }
+        }
+
+        var bridge = VoxelKernel.CreateEmpty();
+        var aFirst = AxisCenter(boundsA, axis) <= AxisCenter(boundsB, axis);
+
+        foreach (var key in footprint)
+        {
+            var rangeA = projectionA.TryGetValue(key, out var rA) ? rA : GetAxisRange(boundsA, axis);
+            var rangeB = projectionB.TryGetValue(key, out var rB) ? rB : GetAxisRange(boundsB, axis);
+
+            var start = aFirst ? rangeA.max : rangeB.max;
+            var end = aFirst ? rangeB.min : rangeA.min;
+
+            if (start > end)
+            {
+                var temp = start;
+                start = end;
+                end = temp;
+            }
+
+            start -= thickness - 1;
+            end += thickness;
+
+            if (start >= end)
+            {
+                continue;
+            }
+
+            for (var pos = start; pos < end; pos++)
+            {
+                var voxel = axis switch
+                {
+                    Axis.X => new Int3(pos, key.Item1, key.Item2),
+                    Axis.Y => new Int3(key.Item1, pos, key.Item2),
+                    Axis.Z => new Int3(key.Item1, key.Item2, pos),
+                    _ => throw new ArgumentOutOfRangeException(nameof(axis))
+                };
+
+                if (mask.HasValue && !mask.Value.Contains(voxel))
+                {
+                    continue;
+                }
+
+                VoxelKernel.AddVoxel(bridge, voxel);
+            }
+        }
+
+        return bridge;
+    }
+
+    private static Dictionary<(int, int), (int min, int max)> BuildProjection(VoxelSolid solid, Axis axis)
+    {
+        var map = new Dictionary<(int, int), (int min, int max)>();
+
+        foreach (var voxel in solid.Voxels)
+        {
+            int keyA;
+            int keyB;
+            int axisCoord;
+
+            switch (axis)
+            {
+                case Axis.X:
+                    keyA = voxel.Y;
+                    keyB = voxel.Z;
+                    axisCoord = voxel.X;
+                    break;
+                case Axis.Y:
+                    keyA = voxel.X;
+                    keyB = voxel.Z;
+                    axisCoord = voxel.Y;
+                    break;
+                case Axis.Z:
+                    keyA = voxel.X;
+                    keyB = voxel.Y;
+                    axisCoord = voxel.Z;
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(axis));
+            }
+
+            var key = (keyA, keyB);
+            if (map.TryGetValue(key, out var range))
+            {
+                var min = Math.Min(range.min, axisCoord);
+                var max = Math.Max(range.max, axisCoord + 1);
+                map[key] = (min, max);
+            }
+            else
+            {
+                map[key] = (axisCoord, axisCoord + 1);
+            }
+        }
+
+        return map;
+    }
+
+    private static (int min, int max) GetAxisRange((Int3 min, Int3 maxExclusive) bounds, Axis axis)
+    {
+        return axis switch
+        {
+            Axis.X => (bounds.min.X, bounds.maxExclusive.X),
+            Axis.Y => (bounds.min.Y, bounds.maxExclusive.Y),
+            Axis.Z => (bounds.min.Z, bounds.maxExclusive.Z),
+            _ => throw new ArgumentOutOfRangeException(nameof(axis))
+        };
+    }
+
+    private static (int min, int max) OverlapRange((int min, int max) a, (int min, int max) b)
+    {
+        return (Math.Max(a.min, b.min), Math.Min(a.max, b.max));
+    }
+
+    private static Axis GetFirstAxis(Axis axis) => axis switch
+    {
+        Axis.X => Axis.Y,
+        Axis.Y => Axis.X,
+        Axis.Z => Axis.X,
+        _ => Axis.X
+    };
+
+    private static Axis GetSecondAxis(Axis axis) => axis switch
+    {
+        Axis.X => Axis.Z,
+        Axis.Y => Axis.Z,
+        Axis.Z => Axis.Y,
+        _ => Axis.Y
+    };
+
+    private static double AxisCenter((Int3 min, Int3 maxExclusive) bounds, Axis axis)
+    {
+        var range = GetAxisRange(bounds, axis);
+        return (range.min + range.max) * 0.5;
+    }
+
+    private static VoxelSolid BuildStrut(VoxelSolid solidA, VoxelSolid solidB, int radius)
+    {
+        var surfaceA = GetSurfaceVoxels(solidA);
+        var surfaceB = GetSurfaceVoxels(solidB);
+
+        if (surfaceA.Count == 0)
+        {
+            surfaceA.AddRange(solidA.Voxels);
+        }
+
+        if (surfaceB.Count == 0)
+        {
+            surfaceB.AddRange(solidB.Voxels);
+        }
+
+        var bestA = surfaceA[0];
+        var bestB = surfaceB[0];
+        var bestDistance = long.MaxValue;
+
+        foreach (var va in surfaceA)
+        {
+            foreach (var vb in surfaceB)
+            {
+                var dx = va.X - vb.X;
+                var dy = va.Y - vb.Y;
+                var dz = va.Z - vb.Z;
+                var dist = (long)dx * dx + (long)dy * dy + (long)dz * dz;
+                if (dist < bestDistance)
+                {
+                    bestDistance = dist;
+                    bestA = va;
+                    bestB = vb;
+                    if (dist == 0)
+                    {
+                        break;
+                    }
+                }
+            }
+        }
+
+        var strut = VoxelKernel.CreateEmpty();
+        var offsets = BuildStructuringElement(radius, Metric.LInf);
+        foreach (var point in RasterizeLine(bestA, bestB))
+        {
+            foreach (var offset in offsets)
+            {
+                VoxelKernel.AddVoxel(strut, new Int3(point.X + offset.X, point.Y + offset.Y, point.Z + offset.Z));
+            }
+        }
+
+        return strut;
+    }
+
+    private static List<Int3> GetSurfaceVoxels(VoxelSolid solid)
+    {
+        var result = new List<Int3>();
+        var voxels = solid.Voxels;
+
+        foreach (var voxel in voxels)
+        {
+            var exposed = false;
+            foreach (var neighbor in SixNeighbors(voxel))
+            {
+                if (!voxels.Contains(neighbor))
+                {
+                    exposed = true;
+                    break;
+                }
+            }
+
+            if (exposed)
+            {
+                result.Add(voxel);
+            }
+        }
+
+        return result;
+    }
+
+    private static IEnumerable<Int3> SixNeighbors(Int3 voxel)
+    {
+        yield return new Int3(voxel.X - 1, voxel.Y, voxel.Z);
+        yield return new Int3(voxel.X + 1, voxel.Y, voxel.Z);
+        yield return new Int3(voxel.X, voxel.Y - 1, voxel.Z);
+        yield return new Int3(voxel.X, voxel.Y + 1, voxel.Z);
+        yield return new Int3(voxel.X, voxel.Y, voxel.Z - 1);
+        yield return new Int3(voxel.X, voxel.Y, voxel.Z + 1);
+    }
+
+    private static IEnumerable<Int3> RasterizeLine(Int3 start, Int3 end)
+    {
+        var x1 = start.X;
+        var y1 = start.Y;
+        var z1 = start.Z;
+        var x2 = end.X;
+        var y2 = end.Y;
+        var z2 = end.Z;
+
+        var dx = Math.Abs(x2 - x1);
+        var dy = Math.Abs(y2 - y1);
+        var dz = Math.Abs(z2 - z1);
+
+        var xs = x2 > x1 ? 1 : -1;
+        var ys = y2 > y1 ? 1 : -1;
+        var zs = z2 > z1 ? 1 : -1;
+
+        yield return new Int3(x1, y1, z1);
+
+        if (dx >= dy && dx >= dz)
+        {
+            var p1 = 2 * dy - dx;
+            var p2 = 2 * dz - dx;
+            while (x1 != x2)
+            {
+                x1 += xs;
+                if (p1 >= 0)
+                {
+                    y1 += ys;
+                    p1 -= 2 * dx;
+                }
+                if (p2 >= 0)
+                {
+                    z1 += zs;
+                    p2 -= 2 * dx;
+                }
+                p1 += 2 * dy;
+                p2 += 2 * dz;
+                yield return new Int3(x1, y1, z1);
+            }
+        }
+        else if (dy >= dx && dy >= dz)
+        {
+            var p1 = 2 * dx - dy;
+            var p2 = 2 * dz - dy;
+            while (y1 != y2)
+            {
+                y1 += ys;
+                if (p1 >= 0)
+                {
+                    x1 += xs;
+                    p1 -= 2 * dy;
+                }
+                if (p2 >= 0)
+                {
+                    z1 += zs;
+                    p2 -= 2 * dy;
+                }
+                p1 += 2 * dx;
+                p2 += 2 * dz;
+                yield return new Int3(x1, y1, z1);
+            }
+        }
+        else
+        {
+            var p1 = 2 * dy - dz;
+            var p2 = 2 * dx - dz;
+            while (z1 != z2)
+            {
+                z1 += zs;
+                if (p1 >= 0)
+                {
+                    y1 += ys;
+                    p1 -= 2 * dz;
+                }
+                if (p2 >= 0)
+                {
+                    x1 += xs;
+                    p2 -= 2 * dz;
+                }
+                p1 += 2 * dy;
+                p2 += 2 * dx;
+                yield return new Int3(x1, y1, z1);
+            }
+        }
     }
 }
 

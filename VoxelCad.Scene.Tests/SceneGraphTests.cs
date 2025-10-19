@@ -1,4 +1,5 @@
 using SolidBuilder.Voxels;
+using System.Linq;
 using VoxelCad.Builder;
 using VoxelCad.Core;
 
@@ -93,5 +94,56 @@ public class SceneGraphTests
             }
         });
         Assert.True(VoxelKernel.GetVolume(baked) > 0);
+    }
+
+    [Fact]
+    public void WeldConnectsSeparatedPlates()
+    {
+        var settings = new ProjectSettings(voxelsPerUnit: 1);
+        var scene = new Scene(settings);
+
+        var plate = CreateBoxPart("plate", new Int3(0, 0, 0), new Int3(10, 10, 3));
+        var instA = scene.AddInstance(plate);
+        var instB = scene.AddInstance(plate);
+        instB.Move(12, 0, 0);
+
+        var welded = scene.Weld(instA, instB, replaceInstances: false);
+
+        Assert.True(VoxelKernel.IsWatertight(welded.Model));
+        Assert.True(VoxelKernel.Is6Connected(welded.Model));
+    }
+
+    [Fact]
+    public void BridgeAxisCreatesPrismConnector()
+    {
+        var settings = new ProjectSettings(voxelsPerUnit: 1);
+        var scene = new Scene(settings);
+
+        var block = CreateBoxPart("block", new Int3(0, 0, 0), new Int3(6, 6, 6));
+        var instA = scene.AddInstance(block);
+        var instB = scene.AddInstance(block);
+        instB.Move(0, 12, 0);
+
+        var bridge = scene.BridgeAxis(instA, instB, Axis.Y, thickness: 1, mask: null, name: null, addInstance: false);
+
+        Assert.True(VoxelKernel.IsWatertight(bridge.Model));
+        Assert.Contains(bridge.Model.Voxels, v => v.Y >= 6 && v.Y < 12);
+    }
+
+    [Fact]
+    public void StrutAddsWatertightBrace()
+    {
+        var settings = new ProjectSettings(voxelsPerUnit: 1);
+        var scene = new Scene(settings);
+
+        var node = CreateBoxPart("node", new Int3(0, 0, 0), new Int3(4, 4, 4));
+        var instA = scene.AddInstance(node);
+        var instB = scene.AddInstance(node);
+        instB.Move(12, 12, 12);
+
+        var strut = scene.Strut(instA, instB, radius: 1, name: null, addInstance: false);
+
+        Assert.True(VoxelKernel.IsWatertight(strut.Model));
+        Assert.Contains(strut.Model.Voxels, v => v.X > 4 && v.X < 12 && v.Y > 4 && v.Y < 12 && v.Z > 4 && v.Z < 12);
     }
 }
