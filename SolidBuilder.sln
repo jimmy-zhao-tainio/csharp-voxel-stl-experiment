@@ -1,0 +1,52 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SolidBuilder.Voxels", "SolidBuilder.Voxels\SolidBuilder.Voxels.csproj", "{0417BF2A-2CB7-4D39-82E9-185AC4022E79}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SolidBuilder.Voxels.Tests", "SolidBuilder.Voxels.Tests\SolidBuilder.Voxels.Tests.csproj", "{6C6E90BC-0BA5-4B39-8546-7CEE3943A5A9}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SolidBuilder.TestBuild", "SolidBuilder.TestBuild\SolidBuilder.TestBuild.csproj", "{0B4D9D5C-6A0A-453E-BA3D-DDE80841987C}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SolidBuilder.TestLoad", "SolidBuilder.TestLoad\SolidBuilder.TestLoad.csproj", "{64ACAEEB-D041-4621-802F-30C3C0F03EB2}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VoxelCad.Builder", "VoxelCad.Builder\VoxelCad.Builder.csproj", "{84D6F4AD-1EBF-4896-A7BD-7DA87E44CC89}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VoxelCad.Builder.Tests", "VoxelCad.Builder.Tests\VoxelCad.Builder.Tests.csproj", "{8D228476-94C4-47FB-8CE2-E576DDB5B67A}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{0417BF2A-2CB7-4D39-82E9-185AC4022E79}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{0417BF2A-2CB7-4D39-82E9-185AC4022E79}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{0417BF2A-2CB7-4D39-82E9-185AC4022E79}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{0417BF2A-2CB7-4D39-82E9-185AC4022E79}.Release|Any CPU.Build.0 = Release|Any CPU
+		{6C6E90BC-0BA5-4B39-8546-7CEE3943A5A9}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6C6E90BC-0BA5-4B39-8546-7CEE3943A5A9}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6C6E90BC-0BA5-4B39-8546-7CEE3943A5A9}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6C6E90BC-0BA5-4B39-8546-7CEE3943A5A9}.Release|Any CPU.Build.0 = Release|Any CPU
+		{0B4D9D5C-6A0A-453E-BA3D-DDE80841987C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{0B4D9D5C-6A0A-453E-BA3D-DDE80841987C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{0B4D9D5C-6A0A-453E-BA3D-DDE80841987C}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{0B4D9D5C-6A0A-453E-BA3D-DDE80841987C}.Release|Any CPU.Build.0 = Release|Any CPU
+		{64ACAEEB-D041-4621-802F-30C3C0F03EB2}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{64ACAEEB-D041-4621-802F-30C3C0F03EB2}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{64ACAEEB-D041-4621-802F-30C3C0F03EB2}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{64ACAEEB-D041-4621-802F-30C3C0F03EB2}.Release|Any CPU.Build.0 = Release|Any CPU
+		{84D6F4AD-1EBF-4896-A7BD-7DA87E44CC89}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{84D6F4AD-1EBF-4896-A7BD-7DA87E44CC89}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{84D6F4AD-1EBF-4896-A7BD-7DA87E44CC89}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{84D6F4AD-1EBF-4896-A7BD-7DA87E44CC89}.Release|Any CPU.Build.0 = Release|Any CPU
+		{8D228476-94C4-47FB-8CE2-E576DDB5B67A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8D228476-94C4-47FB-8CE2-E576DDB5B67A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8D228476-94C4-47FB-8CE2-E576DDB5B67A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8D228476-94C4-47FB-8CE2-E576DDB5B67A}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal

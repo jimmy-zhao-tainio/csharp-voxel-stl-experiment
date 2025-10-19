@@ -1,0 +1,24 @@
+﻿# Build output
+bin/
+obj/
+
+# DotNet artifacts
+**/bin/
+**/obj/
+
+# User-specific
+*.user
+*.rsuser
+*.suo
+*.userprefs
+
+# IDE
+.vscode/
+.vs/
+
+# Coverage
+*.coverage
+*.coverageinfo
+
+# Others
+*.log
