@@ -43,14 +43,41 @@ public readonly struct SaveOptions
     public static SaveOptions Default => new();
 }
 
-public readonly struct ExportOptions
+public enum MeshEngine
 {
-    public ExportOptions(QualityProfile quality = QualityProfile.Medium)
+    VoxelFaces,
+    SurfaceNets
+}
+
+public sealed class QuantizeOptions
+{
+    public static QuantizeOptions None() => new();
+
+    public static QuantizeOptions Units(double step) => new() { StepUnits = step };
+
+    public double StepUnits { get; set; }
+}
+
+public sealed class ExportOptions
+{
+    public ExportOptions()
+    {
+    }
+
+    public ExportOptions(QualityProfile quality)
     {
         Quality = quality;
     }
 
-    public QualityProfile Quality { get; }
+    public MeshEngine Engine { get; set; } = MeshEngine.VoxelFaces;
+
+    public double IsoLevel { get; set; } = 0.5;
+
+    public int SmoothingPasses { get; set; }
+
+    public QuantizeOptions Quantize { get; set; } = QuantizeOptions.None();
+
+    public QualityProfile Quality { get; set; } = QualityProfile.Medium;
 
     public static ExportOptions Default => new();
 }

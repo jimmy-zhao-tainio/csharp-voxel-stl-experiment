@@ -115,7 +115,18 @@ public sealed class Scene
 
         var solid = BuildSolid();
         using var stream = File.Open(path, FileMode.Create, FileAccess.Write, FileShare.None);
-        VoxelKernel.WriteBinaryStl(solid, Path.GetFileNameWithoutExtension(path), stream);
+        var exportOptions = options ?? ExportOptions.Default;
+
+        // For now only VoxelFaces is implemented; SurfaceNets falls back to the same behavior.
+        switch (exportOptions.Engine)
+        {
+            case MeshEngine.VoxelFaces:
+            case MeshEngine.SurfaceNets:
+                VoxelKernel.WriteBinaryStl(solid, Path.GetFileNameWithoutExtension(path), stream);
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(options), "Unknown mesh engine.");
+        }
     }
 
     public VoxelSolid BuildSolid()

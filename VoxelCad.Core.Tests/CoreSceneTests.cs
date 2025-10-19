@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using SolidBuilder.Voxels;
 using VoxelCad.Core;
@@ -54,6 +54,44 @@ public class CoreSceneTests
         Assert.True(new FileInfo(stlPath).Length > 0);
     }
 
+    [Fact]
+    public void ExportStlHonorsOptionsFallback()
+    {
+        var settings = new ProjectSettings(voxelsPerUnit: 1);
+        var project = new Project(settings);
+        var scene = project.NewScene();
+        scene.NewPart("shape", b => b.Box(new Int3(0, 0, 0), new Int3(2, 2, 2)));
+
+        using var tempDir = new TempDir();
+        var stlPathDefault = Path.Combine(tempDir.Path, "default.stl");
+        var stlPathOptions = Path.Combine(tempDir.Path, "options.stl");
+
+        scene.ExportStl(stlPathDefault);
+        scene.ExportStl(stlPathOptions, new ExportOptions
+        {
+            Engine = MeshEngine.SurfaceNets,
+            IsoLevel = 0.4,
+            SmoothingPasses = 2,
+            Quantize = QuantizeOptions.Units(0.1)
+        });
+
+        Assert.True(File.Exists(stlPathDefault));
+        Assert.True(File.Exists(stlPathOptions));
+        Assert.True(new FileInfo(stlPathDefault).Length > 0);
+        Assert.True(new FileInfo(stlPathOptions).Length > 0);
+    }
+
+    [Fact]
+    public void GreedyQuadMergeReducesTriangleCount()
+    {
+        var solid = VoxelKernel.CreateEmpty();
+        VoxelKernel.AddBox(solid, new Int3(0, 0, 0), new Int3(30, 300, 4));
+
+        var naiveTriangles = VoxelKernel.GetSurfaceArea(solid) * 2;
+        var triangles = VoxelKernel.ToTriangles(solid);
+
+        Assert.True(triangles.Count <= naiveTriangles / 2);
+    }
     private sealed class TempDir : IDisposable
     {
         public TempDir()

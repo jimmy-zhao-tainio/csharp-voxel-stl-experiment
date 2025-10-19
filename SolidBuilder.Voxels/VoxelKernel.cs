@@ -1,6 +1,7 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text;
 
 namespace SolidBuilder.Voxels;
@@ -1361,54 +1362,274 @@ public static class VoxelKernel
 
     private static IEnumerable<Triangle> EnumerateTriangles(VoxelSolid solid)
     {
+        var planes = new Dictionary<PlaneKey, List<(int a, int b)>>();
+
         foreach (var face in solid.BoundaryFaces)
         {
             var sign = GetFaceNormalSign(solid, face);
-            var vertices = GetFaceVertices(face);
-            if (sign > 0)
+            if (sign == 0)
             {
-                yield return new Triangle(vertices.v0, vertices.v1, vertices.v2, face.Axis, sign);
-                yield return new Triangle(vertices.v0, vertices.v2, vertices.v3, face.Axis, sign);
+                continue;
             }
-            else if (sign < 0)
+
+            var key = new PlaneKey(face.Axis, face.K, sign);
+            if (!planes.TryGetValue(key, out var list))
             {
-                // Reversed winding for negative normals.
-                yield return new Triangle(vertices.v0, vertices.v2, vertices.v1, face.Axis, sign);
-                yield return new Triangle(vertices.v0, vertices.v3, vertices.v2, face.Axis, sign);
+                list = new List<(int a, int b)>();
+                planes[key] = list;
+            }
+
+            list.Add(GetFaceCoordinates(face));
+        }
+
+        var keys = planes.Keys.ToList();
+        keys.Sort();
+
+        foreach (var key in keys)
+        {
+            foreach (var triangle in MergePlaneFaces(key, planes[key]))
+            {
+                yield return triangle;
             }
         }
     }
 
-    // +X face (outward normal +X): (K,A,B) -> (K,A,B+1) -> (K,A+1,B+1); second triangle uses (K,A+1,B).
-    // +Y face (outward normal +Y): (A,K,B) -> (A,K,B+1) -> (A+1,K,B+1); second triangle uses (A+1,K,B).
-    // +Z face (outward normal +Z): (A,B,K) -> (A+1,B,K) -> (A+1,B+1,K); second triangle uses (A,B+1,K).
-    // Negative normals reuse the same corners with reversed winding.
-    private static (Int3 v0, Int3 v1, Int3 v2, Int3 v3) GetFaceVertices(FaceKey face)
+    private readonly struct PlaneKey : IEquatable<PlaneKey>, IComparable<PlaneKey>
     {
-        return face.Axis switch
+        public PlaneKey(Axis axis, int k, int normalSign)
         {
-            Axis.X => (
-                new Int3(face.K, face.A, face.B),
-                new Int3(face.K, face.A, face.B + 1),
-                new Int3(face.K, face.A + 1, face.B + 1),
-                new Int3(face.K, face.A + 1, face.B)
-            ),
-            Axis.Y => (
-                new Int3(face.A, face.K, face.B),
-                new Int3(face.A, face.K, face.B + 1),
-                new Int3(face.A + 1, face.K, face.B + 1),
-                new Int3(face.A + 1, face.K, face.B)
-            ),
-            Axis.Z => (
-                new Int3(face.A, face.B, face.K),
-                new Int3(face.A + 1, face.B, face.K),
-                new Int3(face.A + 1, face.B + 1, face.K),
-                new Int3(face.A, face.B + 1, face.K)
-            ),
-            _ => throw new ArgumentOutOfRangeException(nameof(face))
-        };
+            Axis = axis;
+            K = k;
+            NormalSign = normalSign > 0 ? 1 : -1;
+        }
+
+        public Axis Axis { get; }
+        public int K { get; }
+        public int NormalSign { get; }
+
+        public int CompareTo(PlaneKey other)
+        {
+            var axisComparison = Axis.CompareTo(other.Axis);
+            if (axisComparison != 0) return axisComparison;
+            var planeComparison = K.CompareTo(other.K);
+            return planeComparison != 0 ? planeComparison : NormalSign.CompareTo(other.NormalSign);
+        }
+
+        public bool Equals(PlaneKey other) => Axis == other.Axis && K == other.K && NormalSign == other.NormalSign;
+
+        public override bool Equals(object? obj) => obj is PlaneKey other && Equals(other);
+
+        public override int GetHashCode() => HashCode.Combine((int)Axis, K, NormalSign);
     }
 
+    private static (int a, int b) GetFaceCoordinates(FaceKey face) => face.Axis switch
+    {
+        Axis.X => (face.A, face.B),
+        Axis.Y => (face.A, face.B),
+        Axis.Z => (face.A, face.B),
+        _ => throw new ArgumentOutOfRangeException(nameof(face))
+    };
+
+    private static IEnumerable<Triangle> MergePlaneFaces(PlaneKey key, List<(int a, int b)> coordinates)
+    {
+        if (coordinates.Count == 0)
+        {
+            yield break;
+        }
+
+        var axis = key.Axis;
+        var plane = key.K;
+        var normalSign = key.NormalSign;
+
+        var minA = int.MaxValue;
+        var maxA = int.MinValue;
+        var minB = int.MaxValue;
+        var maxB = int.MinValue;
+
+        foreach (var (a, b) in coordinates)
+        {
+            if (a < minA) minA = a;
+            if (a > maxA) maxA = a;
+            if (b < minB) minB = b;
+            if (b > maxB) maxB = b;
+        }
+
+        var width = maxA - minA + 1;
+        var height = maxB - minB + 1;
+
+        var grid = new bool[width, height];
+        foreach (var (a, b) in coordinates)
+        {
+            grid[a - minA, b - minB] = true;
+        }
+
+        var visited = new bool[width, height];
+
+        for (var y = 0; y < width; y++)
+        {
+            for (var z = 0; z < height; z++)
+            {
+                if (!grid[y, z] || visited[y, z])
+                {
+                    continue;
+                }
+
+                var w = 0;
+                while (y + w < width && grid[y + w, z] && !visited[y + w, z])
+                {
+                    w++;
+                }
+
+                if (w == 0)
+                {
+                    continue;
+                }
+
+                var h = 0;
+                while (true)
+                {
+                    if (z + h >= height)
+                    {
+                        break;
+                    }
+
+                    var rowValid = true;
+                    for (var i = 0; i < w; i++)
+                    {
+                        if (!grid[y + i, z + h] || visited[y + i, z + h])
+                        {
+                            rowValid = false;
+                            break;
+                        }
+                    }
+
+                    if (!rowValid)
+                    {
+                        break;
+                    }
+
+                    h++;
+                }
+
+                if (h == 0)
+                {
+                    continue;
+                }
+
+                for (var i = 0; i < w; i++)
+                {
+                    for (var j = 0; j < h; j++)
+                    {
+                        visited[y + i, z + j] = true;
+                    }
+                }
+
+                var a0 = minA + y;
+                var a1 = a0 + w;
+                var b0 = minB + z;
+                var b1 = b0 + h;
+
+                foreach (var triangle in GenerateRectangleTriangles(axis, plane, normalSign, a0, a1, b0, b1))
+                {
+                    yield return triangle;
+                }
+            }
+        }
+    }
+
+    private static IEnumerable<Triangle> GenerateRectangleTriangles(Axis axis, int plane, int normalSign, int a0, int a1, int b0, int b1)
+    {
+        if (normalSign == 0)
+        {
+            yield break;
+        }
+
+        var positive = normalSign > 0;
+
+        switch (axis)
+        {
+            case Axis.X:
+            {
+                var x = plane;
+                var y0 = a0;
+                var y1 = a1;
+                var z0 = b0;
+                var z1 = b1;
+
+                var p0 = new Int3(x, y0, z0);
+                var p1 = new Int3(x, y0, z1);
+                var p2 = new Int3(x, y1, z1);
+                var p3 = new Int3(x, y1, z0);
+
+                if (positive)
+                {
+                    yield return new Triangle(p0, p1, p2, axis, normalSign);
+                    yield return new Triangle(p0, p2, p3, axis, normalSign);
+                }
+                else
+                {
+                    yield return new Triangle(p0, p2, p1, axis, normalSign);
+                    yield return new Triangle(p0, p3, p2, axis, normalSign);
+                }
+
+                break;
+            }
+            case Axis.Y:
+            {
+                var y = plane;
+                var x0 = a0;
+                var x1 = a1;
+                var z0 = b0;
+                var z1 = b1;
+
+                var p0 = new Int3(x0, y, z0);
+                var p1 = new Int3(x1, y, z0);
+                var p2 = new Int3(x1, y, z1);
+                var p3 = new Int3(x0, y, z1);
+
+                if (positive)
+                {
+                    yield return new Triangle(p0, p1, p2, axis, normalSign);
+                    yield return new Triangle(p0, p2, p3, axis, normalSign);
+                }
+                else
+                {
+                    yield return new Triangle(p0, p2, p1, axis, normalSign);
+                    yield return new Triangle(p0, p3, p2, axis, normalSign);
+                }
+
+                break;
+            }
+            case Axis.Z:
+            {
+                var z = plane;
+                var x0 = a0;
+                var x1 = a1;
+                var y0 = b0;
+                var y1 = b1;
+
+                var p0 = new Int3(x0, y0, z);
+                var p1 = new Int3(x1, y0, z);
+                var p2 = new Int3(x1, y1, z);
+                var p3 = new Int3(x0, y1, z);
+
+                if (positive)
+                {
+                    yield return new Triangle(p0, p1, p2, axis, normalSign);
+                    yield return new Triangle(p0, p2, p3, axis, normalSign);
+                }
+                else
+                {
+                    yield return new Triangle(p0, p2, p1, axis, normalSign);
+                    yield return new Triangle(p0, p3, p2, axis, normalSign);
+                }
+
+                break;
+            }
+            default:
+                throw new ArgumentOutOfRangeException(nameof(axis));
+        }
+    }
     private static int GetFaceNormalSign(VoxelSolid solid, FaceKey face)
     {
         switch (face.Axis)
