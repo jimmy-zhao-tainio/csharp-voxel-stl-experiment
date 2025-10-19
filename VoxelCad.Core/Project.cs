@@ -1,6 +1,8 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
+using System.Text;
 using System.IO.Compression;
 using SolidBuilder.Voxels;
 using VoxelCad.Builder;
@@ -114,19 +116,93 @@ public sealed class Scene
         }
 
         var solid = BuildSolid();
-        using var stream = File.Open(path, FileMode.Create, FileAccess.Write, FileShare.None);
         var exportOptions = options ?? ExportOptions.Default;
+        var name = Path.GetFileNameWithoutExtension(path);
 
-        // For now only VoxelFaces is implemented; SurfaceNets falls back to the same behavior.
         switch (exportOptions.Engine)
         {
             case MeshEngine.VoxelFaces:
-            case MeshEngine.SurfaceNets:
-                VoxelKernel.WriteBinaryStl(solid, Path.GetFileNameWithoutExtension(path), stream);
+                using (var stream = File.Open(path, FileMode.Create, FileAccess.Write, FileShare.None))
+                {
+                    VoxelKernel.WriteBinaryStl(solid, name, stream);
+                }
                 break;
+            case MeshEngine.SurfaceNets:
+            {
+                var mesh = SurfaceNetsExtractor.Extract(solid, exportOptions.IsoLevel);
+                using var stream = File.Open(path, FileMode.Create, FileAccess.Write, FileShare.None);
+                WriteBinaryStl(mesh, name, stream);
+                break;
+            }
             default:
                 throw new ArgumentOutOfRangeException(nameof(options), "Unknown mesh engine.");
         }
+    }
+
+    private static void WriteBinaryStl(MeshD mesh, string name, Stream stream)
+    {
+        if (mesh is null) throw new ArgumentNullException(nameof(mesh));
+
+        using var writer = new BinaryWriter(stream, Encoding.ASCII, leaveOpen: true);
+        var header = new byte[80];
+        if (!string.IsNullOrEmpty(name))
+        {
+            var nameBytes = Encoding.ASCII.GetBytes(name);
+            Array.Copy(nameBytes, header, Math.Min(nameBytes.Length, header.Length));
+        }
+
+        writer.Write(header);
+        writer.Write((uint)mesh.F.Count);
+
+        foreach (var tri in mesh.F)
+        {
+            var p0 = mesh.V[tri.A];
+            var p1 = mesh.V[tri.B];
+            var p2 = mesh.V[tri.C];
+
+            var ux = p1.X - p0.X;
+            var uy = p1.Y - p0.Y;
+            var uz = p1.Z - p0.Z;
+            var vx = p2.X - p0.X;
+            var vy = p2.Y - p0.Y;
+            var vz = p2.Z - p0.Z;
+
+            var nx = uy * vz - uz * vy;
+            var ny = uz * vx - ux * vz;
+            var nz = ux * vy - uy * vx;
+            var length = Math.Sqrt(nx * nx + ny * ny + nz * nz);
+            if (length > 0)
+            {
+                var inv = 1.0 / length;
+                nx *= inv;
+                ny *= inv;
+                nz *= inv;
+            }
+            else
+            {
+                nx = ny = nz = 0;
+            }
+
+            writer.Write((float)nx);
+            writer.Write((float)ny);
+            writer.Write((float)nz);
+
+            writer.Write((float)p0.X);
+            writer.Write((float)p0.Y);
+            writer.Write((float)p0.Z);
+
+            writer.Write((float)p1.X);
+            writer.Write((float)p1.Y);
+            writer.Write((float)p1.Z);
+
+            writer.Write((float)p2.X);
+            writer.Write((float)p2.Y);
+            writer.Write((float)p2.Z);
+
+            writer.Write((ushort)0);
+        }
+
+        writer.Flush();
     }
 
     public VoxelSolid BuildSolid()

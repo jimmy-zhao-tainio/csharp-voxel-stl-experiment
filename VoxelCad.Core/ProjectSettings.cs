@@ -52,10 +52,8 @@ public enum MeshEngine
 public sealed class QuantizeOptions
 {
     public static QuantizeOptions None() => new();
-
     public static QuantizeOptions Units(double step) => new() { StepUnits = step };
-
-    public double StepUnits { get; set; }
+    public double StepUnits;
 }
 
 public sealed class ExportOptions
@@ -69,14 +67,10 @@ public sealed class ExportOptions
         Quality = quality;
     }
 
-    public MeshEngine Engine { get; set; } = MeshEngine.VoxelFaces;
-
-    public double IsoLevel { get; set; } = 0.5;
-
-    public int SmoothingPasses { get; set; }
-
-    public QuantizeOptions Quantize { get; set; } = QuantizeOptions.None();
-
+    public MeshEngine Engine = MeshEngine.VoxelFaces;
+    public double IsoLevel = 0.5;
+    public int SmoothingPasses = 0;
+    public QuantizeOptions Quantize = QuantizeOptions.None();
     public QualityProfile Quality { get; set; } = QualityProfile.Medium;
 
     public static ExportOptions Default => new();

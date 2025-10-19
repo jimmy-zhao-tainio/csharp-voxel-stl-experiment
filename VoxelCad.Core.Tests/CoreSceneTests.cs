@@ -69,7 +69,7 @@ public class CoreSceneTests
         scene.ExportStl(stlPathDefault);
         scene.ExportStl(stlPathOptions, new ExportOptions
         {
-            Engine = MeshEngine.SurfaceNets,
+            Engine = MeshEngine.VoxelFaces,
             IsoLevel = 0.4,
             SmoothingPasses = 2,
             Quantize = QuantizeOptions.Units(0.1)
@@ -79,6 +79,23 @@ public class CoreSceneTests
         Assert.True(File.Exists(stlPathOptions));
         Assert.True(new FileInfo(stlPathDefault).Length > 0);
         Assert.True(new FileInfo(stlPathOptions).Length > 0);
+    }
+
+    [Fact]
+    public void SurfaceNetsExportThrowsUntilImplemented()
+    {
+        var settings = new ProjectSettings(voxelsPerUnit: 1);
+        var project = new Project(settings);
+        var scene = project.NewScene();
+        scene.NewPart("shape", b => b.Box(new Int3(0, 0, 0), new Int3(2, 2, 2)));
+
+        using var tempDir = new TempDir();
+        var stlPath = Path.Combine(tempDir.Path, "surface-nets.stl");
+
+        Assert.Throws<NotImplementedException>(() => scene.ExportStl(stlPath, new ExportOptions
+        {
+            Engine = MeshEngine.SurfaceNets
+        }));
     }
 
     [Fact]
