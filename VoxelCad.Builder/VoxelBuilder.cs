@@ -1,3 +1,4 @@
+using System;
 using SolidBuilder.Voxels;
 
 namespace VoxelCad.Builder;
@@ -55,11 +56,35 @@ public sealed class VoxelBuilder
         return this;
     }
 
+    public VoxelBuilder CylinderX(int cy, int cz, int xMin, int xMaxExclusive, int radius)
+    {
+        ApplyCylinderAxis(Axis.X, cy, cz, xMin, xMaxExclusive, radius, subtract: false);
+        return this;
+    }
+
+    public VoxelBuilder CylinderY(int cx, int cz, int yMin, int yMaxExclusive, int radius)
+    {
+        ApplyCylinderAxis(Axis.Y, cx, cz, yMin, yMaxExclusive, radius, subtract: false);
+        return this;
+    }
+
     public VoxelBuilder CutCylinderZ(int cx, int cy, int zMin, int zMaxExclusive, int radius)
     {
         var temp = VoxelKernel.CreateEmpty();
         VoxelKernel.AddCylinderZ(temp, cx, cy, zMin, zMaxExclusive, radius);
         ApplyTransformed(temp, subtract: true);
+        return this;
+    }
+
+    public VoxelBuilder CutCylinderX(int cy, int cz, int xMin, int xMaxExclusive, int radius)
+    {
+        ApplyCylinderAxis(Axis.X, cy, cz, xMin, xMaxExclusive, radius, subtract: true);
+        return this;
+    }
+
+    public VoxelBuilder CutCylinderY(int cx, int cz, int yMin, int yMaxExclusive, int radius)
+    {
+        ApplyCylinderAxis(Axis.Y, cx, cz, yMin, yMaxExclusive, radius, subtract: true);
         return this;
     }
 
@@ -105,6 +130,27 @@ public sealed class VoxelBuilder
     public VoxelBuilder Mirror(Axis axis)
     {
         _currentTransforms.Add(TransformOp.Mirror(axis));
+        return this;
+    }
+
+    public VoxelBuilder Rotate90Around(Axis axis, int quarterTurns, Int3 pivot)
+    {
+        if (quarterTurns == 0)
+        {
+            return this;
+        }
+
+        Translate(-pivot.X, -pivot.Y, -pivot.Z);
+        Rotate90(axis, quarterTurns);
+        Translate(pivot.X, pivot.Y, pivot.Z);
+        return this;
+    }
+
+    public VoxelBuilder MirrorAround(Axis axis, Int3 pivot)
+    {
+        Translate(-pivot.X, -pivot.Y, -pivot.Z);
+        Mirror(axis);
+        Translate(pivot.X, pivot.Y, pivot.Z);
         return this;
     }
 
@@ -186,6 +232,17 @@ public sealed class VoxelBuilder
         var other = RunChild(scope);
         var result = VoxelKernel.Intersect(_solid, other);
         CopyInto(_solid, result);
+        return this;
+    }
+
+    public VoxelBuilder WithLinearTransform(int[,] matrix, Int3 translation, Action<VoxelBuilder> scope)
+    {
+        if (matrix is null) throw new ArgumentNullException(nameof(matrix));
+        if (scope is null) throw new ArgumentNullException(nameof(scope));
+
+        var next = CloneTransforms(_currentTransforms);
+        next.Add(TransformOp.Linear(CloneMatrix(matrix), translation));
+        WithTransform(next, scope);
         return this;
     }
 
@@ -271,6 +328,20 @@ public sealed class VoxelBuilder
 
     private static List<TransformOp> CloneTransforms(List<TransformOp> source) => new(source);
 
+    private static int[,] CloneMatrix(int[,] matrix)
+    {
+        var copy = new int[3, 3];
+        for (var i = 0; i < 3; i++)
+        {
+            for (var j = 0; j < 3; j++)
+            {
+                copy[i, j] = matrix[i, j];
+            }
+        }
+
+        return copy;
+    }
+
     private static VoxelSolid ApplyTransform(VoxelSolid solid, List<TransformOp> ops)
     {
         var result = VoxelKernel.CreateEmpty();
@@ -281,6 +352,56 @@ public sealed class VoxelBuilder
         }
 
         return result;
+    }
+
+    private void ApplyCylinderAxis(Axis axis, int c1, int c2, int minInclusive, int maxExclusive, int radius, bool subtract)
+    {
+        var temp = VoxelKernel.CreateEmpty();
+        var radiusSq = radius * radius;
+
+        switch (axis)
+        {
+            case Axis.X:
+                for (var x = minInclusive; x < maxExclusive; x++)
+                {
+                    for (var y = c1 - radius; y <= c1 + radius; y++)
+                    {
+                        var dy = y - c1;
+                        for (var z = c2 - radius; z <= c2 + radius; z++)
+                        {
+                            var dz = z - c2;
+                            if (dy * dy + dz * dz <= radiusSq)
+                            {
+                                VoxelKernel.AddVoxel(temp, new Int3(x, y, z));
+                            }
+                        }
+                    }
+                }
+
+                break;
+            case Axis.Y:
+                for (var y = minInclusive; y < maxExclusive; y++)
+                {
+                    for (var x = c1 - radius; x <= c1 + radius; x++)
+                    {
+                        var dx = x - c1;
+                        for (var z = c2 - radius; z <= c2 + radius; z++)
+                        {
+                            var dz = z - c2;
+                            if (dx * dx + dz * dz <= radiusSq)
+                            {
+                                VoxelKernel.AddVoxel(temp, new Int3(x, y, z));
+                            }
+                        }
+                    }
+                }
+
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(axis));
+        }
+
+        ApplyTransformed(temp, subtract);
     }
 
     private static void CopyInto(VoxelSolid target, VoxelSolid source)
@@ -298,19 +419,34 @@ public sealed class VoxelBuilder
             Axis = axis;
             Value = value;
             Delta = delta;
+            Matrix = null;
+            Translation = default;
+        }
+
+        private TransformOp(int[,] matrix, Int3 translation)
+        {
+            Type = TransformType.Linear;
+            Axis = Axis.X;
+            Value = 0;
+            Delta = default;
+            Matrix = matrix;
+            Translation = translation;
         }
 
         private enum TransformType
         {
             Translate,
             Rotate,
-            Mirror
+            Mirror,
+            Linear
         }
 
         private TransformType Type { get; }
         private Axis Axis { get; }
         private int Value { get; }
         private Int3 Delta { get; }
+        private int[,]? Matrix { get; }
+        private Int3 Translation { get; }
 
         public static TransformOp Translate(int dx, int dy, int dz) =>
             new(TransformType.Translate, Axis.X, 0, new Int3(dx, dy, dz));
@@ -321,6 +457,9 @@ public sealed class VoxelBuilder
         public static TransformOp Mirror(Axis axis) =>
             new(TransformType.Mirror, axis, 0, default);
 
+        public static TransformOp Linear(int[,] matrix, Int3 translation) =>
+            new(matrix, translation);
+
         public VoxelSolid Apply(VoxelSolid solid)
         {
             return Type switch
@@ -328,8 +467,28 @@ public sealed class VoxelBuilder
                 TransformType.Translate => VoxelKernel.Translate(solid, Delta.X, Delta.Y, Delta.Z),
                 TransformType.Rotate => VoxelKernel.Rotate90(solid, Axis, Value),
                 TransformType.Mirror => VoxelKernel.Mirror(solid, Axis),
+                TransformType.Linear => ApplyLinear(solid),
                 _ => solid
             };
+        }
+
+        private VoxelSolid ApplyLinear(VoxelSolid solid)
+        {
+            if (Matrix is null)
+            {
+                return solid;
+            }
+
+            var result = VoxelKernel.CreateEmpty();
+            foreach (var voxel in solid.Voxels)
+            {
+                var x = Matrix[0, 0] * voxel.X + Matrix[0, 1] * voxel.Y + Matrix[0, 2] * voxel.Z + Translation.X;
+                var y = Matrix[1, 0] * voxel.X + Matrix[1, 1] * voxel.Y + Matrix[1, 2] * voxel.Z + Translation.Y;
+                var z = Matrix[2, 0] * voxel.X + Matrix[2, 1] * voxel.Y + Matrix[2, 2] * voxel.Z + Translation.Z;
+                VoxelKernel.AddVoxel(result, new Int3(x, y, z));
+            }
+
+            return result;
         }
     }
 }

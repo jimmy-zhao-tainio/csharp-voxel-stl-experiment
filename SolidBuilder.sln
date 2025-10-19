@@ -15,6 +15,14 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VoxelCad.Builder", "VoxelCa
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VoxelCad.Builder.Tests", "VoxelCad.Builder.Tests\VoxelCad.Builder.Tests.csproj", "{8D228476-94C4-47FB-8CE2-E576DDB5B67A}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VoxelCad.Core", "VoxelCad.Core\VoxelCad.Core.csproj", "{BFC6A5CA-4DF2-4E1B-A259-FDB88534F3CF}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VoxelCad.Core.Tests", "VoxelCad.Core.Tests\VoxelCad.Core.Tests.csproj", "{463F7890-3E5C-42F2-A429-5E3488AB70C1}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VoxelCad.Scene", "VoxelCad.Scene\VoxelCad.Scene.csproj", "{A814C7D6-7F76-4825-91C9-74D60C370A6F}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VoxelCad.Scene.Tests", "VoxelCad.Scene.Tests\VoxelCad.Scene.Tests.csproj", "{5C5AEB3B-159D-49DE-AF96-F390C388707D}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -48,5 +56,21 @@ Global
 		{8D228476-94C4-47FB-8CE2-E576DDB5B67A}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{8D228476-94C4-47FB-8CE2-E576DDB5B67A}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{8D228476-94C4-47FB-8CE2-E576DDB5B67A}.Release|Any CPU.Build.0 = Release|Any CPU
+		{BFC6A5CA-4DF2-4E1B-A259-FDB88534F3CF}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{BFC6A5CA-4DF2-4E1B-A259-FDB88534F3CF}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{BFC6A5CA-4DF2-4E1B-A259-FDB88534F3CF}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{BFC6A5CA-4DF2-4E1B-A259-FDB88534F3CF}.Release|Any CPU.Build.0 = Release|Any CPU
+		{463F7890-3E5C-42F2-A429-5E3488AB70C1}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{463F7890-3E5C-42F2-A429-5E3488AB70C1}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{463F7890-3E5C-42F2-A429-5E3488AB70C1}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{463F7890-3E5C-42F2-A429-5E3488AB70C1}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A814C7D6-7F76-4825-91C9-74D60C370A6F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A814C7D6-7F76-4825-91C9-74D60C370A6F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A814C7D6-7F76-4825-91C9-74D60C370A6F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A814C7D6-7F76-4825-91C9-74D60C370A6F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{5C5AEB3B-159D-49DE-AF96-F390C388707D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{5C5AEB3B-159D-49DE-AF96-F390C388707D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{5C5AEB3B-159D-49DE-AF96-F390C388707D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{5C5AEB3B-159D-49DE-AF96-F390C388707D}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

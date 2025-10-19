@@ -1,4 +1,7 @@
 using SolidBuilder.Voxels;
+using VoxelCad.Core;
+using VoxelCad.Scene;
+using SceneRole = VoxelCad.Scene.Role;
 
 namespace VoxelCad.Builder.Tests;
 
@@ -86,6 +89,45 @@ public class VoxelBuilderTests
         Assert.True(VoxelKernel.IsWatertight(supersampled));
         Assert.NotEqual(0, VoxelKernel.GetVolume(obb));
         Assert.NotEqual(0, VoxelKernel.GetVolume(supersampled));
+    }
+
+    [Fact]
+    public void CylinderXAndYProduceExpectedVoxels()
+    {
+        var solidX = new VoxelBuilder()
+            .CylinderX(0, 0, -2, 3, 2)
+            .Build();
+
+        Assert.True(VoxelKernel.IsWatertight(solidX));
+        Assert.True(solidX.Voxels.Count > 0);
+
+        var solidY = new VoxelBuilder()
+            .CylinderY(0, 0, -2, 3, 2)
+            .Build();
+
+        Assert.True(VoxelKernel.IsWatertight(solidY));
+        Assert.Equal(VoxelKernel.GetVolume(solidX), VoxelKernel.GetVolume(solidY));
+    }
+
+    [Fact]
+    public void UsingLocalAppliesInstanceFrame()
+    {
+        var settings = new ProjectSettings(voxelsPerUnit: 1);
+        var columnSolid = VoxelKernel.CreateEmpty();
+        VoxelKernel.AddBox(columnSolid, new Int3(-2, -2, 0), new Int3(2, 2, 12));
+        var part = new Part("column", columnSolid);
+
+        var scene = new VoxelCad.Scene.Scene(settings);
+        var instance = scene.AddInstance(part);
+        instance.RotateAny(Axis.Z, 22.5, new Int3(0, 0, 0));
+
+        var builder = new VoxelBuilder()
+            .Box(new Int3(-3, -3, 0), new Int3(3, 3, 12))
+            .UsingLocal(instance, SceneRole.Hole, b => b.CylinderZ(0, 0, 0, 12, 1));
+        var result = builder.Build();
+
+        Assert.True(VoxelKernel.IsWatertight(result));
+        Assert.NotEqual(0, VoxelKernel.GetVolume(result));
     }
 
     private static void HolePattern(VoxelBuilder pattern)

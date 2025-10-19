@@ -1,7 +1,8 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
     <ProjectReference Include="..\SolidBuilder.Voxels\SolidBuilder.Voxels.csproj" />
+    <ProjectReference Include="..\VoxelCad.Builder\VoxelCad.Builder.csproj" />
   </ItemGroup>
 
   <PropertyGroup>
