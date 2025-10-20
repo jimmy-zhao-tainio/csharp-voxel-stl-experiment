@@ -34,6 +34,12 @@ public class CoreSceneTests
         var scene = project.NewScene();
         scene.NewPart("panel", b => b.Box(new Int3(0, 0, 0), new Int3(4, 4, 2)));
 
+        var solid = scene.BuildSolid();
+        var mesh = VoxelFacesMesher.Build(solid);
+        Assert.True(MeshValidation.IsClosedManifold(mesh), DescribeMeshIssues(mesh));
+        Assert.True(MeshValidation.SignedVolume(mesh) > 0);
+        Assert.Equal(mesh.V.Count, MeshValidation.UniqueVertexCount(mesh));
+
         using var tempDir = new TempDir();
         var sbvxPath = Path.Combine(tempDir.Path, "test.vox");
         var stlPath = Path.Combine(tempDir.Path, "test.stl");
@@ -82,6 +88,25 @@ public class CoreSceneTests
     }
 
     [Fact]
+    public void VoxelFacesMesh_HasPositiveVolumeAndIsClosed()
+    {
+        var settings = new ProjectSettings(voxelsPerUnit: 1);
+        var project = new Project(settings);
+        var scene = project.NewScene();
+        scene.NewPart("shape", b =>
+        {
+            b.Box(new Int3(0, 0, 0), new Int3(6, 6, 3));
+            b.Subtract(inner => inner.CylinderZ(3, 3, 0, 3, 2));
+        });
+
+        var solid = scene.BuildSolid();
+        var mesh = VoxelFacesMesher.Build(solid);
+
+        Assert.True(MeshValidation.IsClosedManifold(mesh), DescribeMeshIssues(mesh));
+        Assert.True(MeshValidation.SignedVolume(mesh) > 0);
+    }
+
+    [Fact]
     public void SurfaceNetsExportThrowsUntilImplemented()
     {
         var settings = new ProjectSettings(voxelsPerUnit: 1);
@@ -108,6 +133,80 @@ public class CoreSceneTests
         var triangles = VoxelKernel.ToTriangles(solid);
 
         Assert.True(triangles.Count <= naiveTriangles / 2);
+    }
+
+    private static string DescribeMeshIssues(MeshD mesh)
+    {
+        var degenerates = new List<int>();
+        for (var i = 0; i < mesh.F.Count; i++)
+        {
+            var tri = mesh.F[i];
+            var a = mesh.V[tri.A];
+            var b = mesh.V[tri.B];
+            var c = mesh.V[tri.C];
+            var abx = b.X - a.X;
+            var aby = b.Y - a.Y;
+            var abz = b.Z - a.Z;
+            var acx = c.X - a.X;
+            var acy = c.Y - a.Y;
+            var acz = c.Z - a.Z;
+            var crossX = aby * acz - abz * acy;
+            var crossY = abz * acx - abx * acz;
+            var crossZ = abx * acy - aby * acx;
+            var areaSq = crossX * crossX + crossY * crossY + crossZ * crossZ;
+            if (areaSq <= double.Epsilon)
+            {
+                degenerates.Add(i);
+            }
+        }
+
+        var edges = new Dictionary<(int a, int b), int>();
+        foreach (var tri in mesh.F)
+        {
+            CountEdge(edges, tri.A, tri.B);
+            CountEdge(edges, tri.B, tri.C);
+            CountEdge(edges, tri.C, tri.A);
+        }
+
+        var incidenceIssues = new List<string>();
+        foreach (var pair in edges.Where(pair => pair.Value != 2))
+        {
+            var va = mesh.V[pair.Key.a];
+            var vb = mesh.V[pair.Key.b];
+            var triRefs = new List<int>();
+            for (var i = 0; i < mesh.F.Count; i++)
+            {
+                var tri = mesh.F[i];
+                var hasA = tri.A == pair.Key.a || tri.B == pair.Key.a || tri.C == pair.Key.a;
+                var hasB = tri.A == pair.Key.b || tri.B == pair.Key.b || tri.C == pair.Key.b;
+                if (hasA && hasB)
+                {
+                    triRefs.Add(i);
+                }
+            }
+
+            incidenceIssues.Add($"({pair.Key.a},{pair.Key.b})={pair.Value}[({va.X},{va.Y},{va.Z})->({vb.X},{vb.Y},{vb.Z}) tris: {string.Join(',', triRefs)}]");
+        }
+
+        var parts = new List<string>();
+        if (degenerates.Count > 0)
+        {
+            parts.Add($"degenerate tris: {string.Join(',', degenerates)}");
+        }
+
+        if (incidenceIssues.Count > 0)
+        {
+            parts.Add($"edge incidence: {string.Join(';', incidenceIssues)}");
+        }
+
+        return parts.Count == 0 ? "MeshValidation reported failure" : string.Join(" | ", parts);
+    }
+
+    private static void CountEdge(Dictionary<(int a, int b), int> edges, int a, int b)
+    {
+        var key = a < b ? (a, b) : (b, a);
+        edges.TryGetValue(key, out var count);
+        edges[key] = count + 1;
     }
     private sealed class TempDir : IDisposable
     {
