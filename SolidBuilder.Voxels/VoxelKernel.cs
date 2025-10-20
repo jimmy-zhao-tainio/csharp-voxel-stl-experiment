@@ -83,6 +83,12 @@ public class VoxelSolid
 
 public static class VoxelKernel
 {
+    public enum Metric
+    {
+        LInf,
+        L1
+    }
+
     private readonly struct EdgeKey : IEquatable<EdgeKey>
     {
         public readonly Axis Axis;
@@ -181,8 +187,8 @@ public static class VoxelKernel
             {
                 solid.BoundaryFaces.Add(face);
             }
-        }
     }
+}
 
     public static void RemoveVoxel(VoxelSolid solid, Int3 cell)
     {
@@ -210,6 +216,155 @@ public static class VoxelKernel
         {
             AddVoxel(solid, cell);
         }
+    }
+
+    private static readonly Dictionary<(Metric metric, int radius), Int3[]> StructuringElements = new();
+    private static readonly object StructuringLock = new();
+
+    private static Int3[] GetStructuringOffsets(int radius, Metric metric)
+    {
+        if (radius < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(radius), "Radius must be non-negative.");
+        }
+
+        var key = (metric, radius);
+        lock (StructuringLock)
+        {
+            if (!StructuringElements.TryGetValue(key, out var offsets))
+            {
+                var list = new List<Int3>();
+                for (var dx = -radius; dx <= radius; dx++)
+                {
+                    for (var dy = -radius; dy <= radius; dy++)
+                    {
+                        for (var dz = -radius; dz <= radius; dz++)
+                        {
+                            var include = metric switch
+                            {
+                                Metric.LInf => Math.Max(Math.Max(Math.Abs(dx), Math.Abs(dy)), Math.Abs(dz)) <= radius,
+                                Metric.L1 => Math.Abs(dx) + Math.Abs(dy) + Math.Abs(dz) <= radius,
+                                _ => false
+                            };
+
+                            if (include)
+                            {
+                                list.Add(new Int3(dx, dy, dz));
+                            }
+                        }
+                    }
+                }
+
+                offsets = list.ToArray();
+                StructuringElements[key] = offsets;
+            }
+
+            return offsets;
+        }
+    }
+
+    private static VoxelSolid CloneSolid(VoxelSolid source)
+    {
+        var clone = CreateEmpty();
+        foreach (var cell in source.Voxels)
+        {
+            AddVoxel(clone, cell);
+        }
+
+        return clone;
+    }
+
+    public static VoxelSolid Dilate(VoxelSolid solid, int radius, Metric metric = Metric.LInf)
+    {
+        if (solid is null)
+        {
+            throw new ArgumentNullException(nameof(solid));
+        }
+
+        var offsets = GetStructuringOffsets(radius, metric);
+        if (offsets.Length == 0)
+        {
+            return CloneSolid(solid);
+        }
+
+        var result = CreateEmpty();
+        foreach (var cell in solid.Voxels)
+        {
+            foreach (var offset in offsets)
+            {
+                AddVoxel(result, new Int3(cell.X + offset.X, cell.Y + offset.Y, cell.Z + offset.Z));
+            }
+        }
+
+        return result;
+    }
+
+    public static VoxelSolid Erode(VoxelSolid solid, int radius, Metric metric = Metric.LInf)
+    {
+        if (solid is null)
+        {
+            throw new ArgumentNullException(nameof(solid));
+        }
+
+        var offsets = GetStructuringOffsets(radius, metric);
+        if (offsets.Length == 0)
+        {
+            return CloneSolid(solid);
+        }
+
+        var result = CreateEmpty();
+        foreach (var cell in solid.Voxels)
+        {
+            var keep = true;
+            foreach (var offset in offsets)
+            {
+                var neighbor = new Int3(cell.X + offset.X, cell.Y + offset.Y, cell.Z + offset.Z);
+                if (!solid.Voxels.Contains(neighbor))
+                {
+                    keep = false;
+                    break;
+                }
+            }
+
+            if (keep)
+            {
+                AddVoxel(result, cell);
+            }
+        }
+
+        return result;
+    }
+
+    public static VoxelSolid Open(VoxelSolid solid, int radius, Metric metric = Metric.LInf)
+    {
+        if (solid is null)
+        {
+            throw new ArgumentNullException(nameof(solid));
+        }
+
+        if (radius < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(radius), "Radius must be non-negative.");
+        }
+
+        var eroded = Erode(solid, radius, metric);
+        return Dilate(eroded, radius, metric);
+    }
+
+    public static VoxelSolid Close(VoxelSolid solid, int radius, Metric metric = Metric.LInf)
+    {
+        if (solid is null)
+        {
+            throw new ArgumentNullException(nameof(solid));
+        }
+
+        if (radius < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(radius), "Radius must be non-negative.");
+        }
+
+        var dilated = Dilate(solid, radius, metric);
+        return Erode(dilated, radius, metric);
     }
 
     public static void RemoveVoxels(VoxelSolid solid, IEnumerable<Int3> cells)

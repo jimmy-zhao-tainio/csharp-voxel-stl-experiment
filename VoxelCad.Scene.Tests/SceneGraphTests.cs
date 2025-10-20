@@ -67,6 +67,22 @@ public class SceneGraphTests
     }
 
     [Fact]
+    public void BakeAtResolutionUpscalesVoxelCount()
+    {
+        var settings = new ProjectSettings(voxelsPerUnit: 2);
+        var scene = new Scene(settings);
+        var part = CreateBoxPart("block", new Int3(0, 0, 0), new Int3(4, 4, 4));
+        scene.AddInstance(part);
+
+        var baseSolid = scene.BakeAtResolution(2);
+        var highRes = scene.BakeAtResolution(4);
+
+        Assert.True(VoxelKernel.IsWatertight(baseSolid));
+        Assert.True(VoxelKernel.IsWatertight(highRes));
+        Assert.Equal(VoxelKernel.GetVolume(baseSolid) * 8, VoxelKernel.GetVolume(highRes));
+    }
+
+    [Fact]
     public void UsingLocalOnRotatedInstanceProducesWatertightResult()
     {
         var settings = new ProjectSettings(voxelsPerUnit: 1);

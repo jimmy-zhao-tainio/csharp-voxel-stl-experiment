@@ -350,6 +350,88 @@ public sealed class Scene
         return result ?? VoxelKernel.CreateEmpty();
     }
 
+    public VoxelSolid BakeAtResolution(int voxelsPerUnit)
+    {
+        if (voxelsPerUnit <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(voxelsPerUnit), "Voxels per unit must be positive.");
+        }
+
+        var baseVoxelsPerUnit = Settings.VoxelsPerUnit;
+        if (voxelsPerUnit == baseVoxelsPerUnit)
+        {
+            return Bake();
+        }
+
+        if (voxelsPerUnit % baseVoxelsPerUnit != 0)
+        {
+            throw new ArgumentException("Requested resolution must be an integer multiple of the project setting.", nameof(voxelsPerUnit));
+        }
+
+        var scale = voxelsPerUnit / baseVoxelsPerUnit;
+        var baked = Bake();
+        return ScaleSolid(baked, scale);
+    }
+
+    public VoxelSolid MorphOpen(int radius, Metric metric = Metric.LInf)
+    {
+        var baked = Bake();
+        return VoxelKernel.Open(baked, radius, ToKernelMetric(metric));
+    }
+
+    public VoxelSolid MorphClose(int radius, Metric metric = Metric.LInf)
+    {
+        var baked = Bake();
+        return VoxelKernel.Close(baked, radius, ToKernelMetric(metric));
+    }
+
+    private static VoxelKernel.Metric ToKernelMetric(Metric metric)
+    {
+        return metric switch
+        {
+            Metric.LInf => VoxelKernel.Metric.LInf,
+            Metric.L1 => VoxelKernel.Metric.L1,
+            _ => VoxelKernel.Metric.LInf
+        };
+    }
+
+    private static VoxelSolid ScaleSolid(VoxelSolid source, int scale)
+    {
+        if (scale <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(scale), "Scale must be positive.");
+        }
+
+        if (scale == 1)
+        {
+            var clone = VoxelKernel.CreateEmpty();
+            VoxelKernel.AddVoxels(clone, source.Voxels);
+            return clone;
+        }
+
+        var result = VoxelKernel.CreateEmpty();
+        foreach (var voxel in source.Voxels)
+        {
+            var baseX = voxel.X * scale;
+            var baseY = voxel.Y * scale;
+            var baseZ = voxel.Z * scale;
+
+            for (var dx = 0; dx < scale; dx++)
+            {
+                for (var dy = 0; dy < scale; dy++)
+                {
+                    for (var dz = 0; dz < scale; dz++)
+                    {
+                        var scaled = new Int3(baseX + dx, baseY + dy, baseZ + dz);
+                        VoxelKernel.AddVoxel(result, scaled);
+                    }
+                }
+            }
+        }
+
+        return result;
+    }
+
     public Part Weld(Instance a, Instance b, int? radius = null, Metric metric = Metric.LInf, bool replaceInstances = true, string? name = null)
     {
         if (a is null) throw new ArgumentNullException(nameof(a));

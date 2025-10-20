@@ -145,4 +145,26 @@ public class KernelTests
         Assert.True(VoxelKernel.IsWatertight(rotated));
         Assert.NotEqual(0, VoxelKernel.GetVolume(rotated));
     }
+
+    [Fact]
+    public void MorphologyOpenCloseAffectsBumpsAndPits()
+    {
+        var pitSolid = VoxelKernel.CreateEmpty();
+        VoxelKernel.AddBox(pitSolid, new Int3(0, 0, 0), new Int3(10, 10, 2));
+        VoxelKernel.RemoveVoxel(pitSolid, new Int3(5, 5, 1));
+        Assert.True(VoxelKernel.IsWatertight(pitSolid));
+
+        var closed = VoxelKernel.Close(pitSolid, radius: 1);
+        Assert.Contains(new Int3(5, 5, 1), closed.Voxels);
+        Assert.True(VoxelKernel.IsWatertight(closed));
+
+        var bumpSolid = VoxelKernel.CreateEmpty();
+        VoxelKernel.AddBox(bumpSolid, new Int3(0, 0, 0), new Int3(10, 10, 2));
+        VoxelKernel.AddVoxel(bumpSolid, new Int3(5, 5, 2));
+        Assert.True(VoxelKernel.IsWatertight(bumpSolid));
+
+        var opened = VoxelKernel.Open(bumpSolid, radius: 1);
+        Assert.DoesNotContain(new Int3(5, 5, 2), opened.Voxels);
+        Assert.True(VoxelKernel.IsWatertight(opened));
+    }
 }
