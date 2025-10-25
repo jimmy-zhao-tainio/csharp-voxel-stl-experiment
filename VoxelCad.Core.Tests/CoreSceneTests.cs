@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Text;
 using SolidBuilder.Voxels;
 using VoxelCad.Core;
 
@@ -232,6 +233,36 @@ public class CoreSceneTests
         var key = a < b ? (a, b) : (b, a);
         edges.TryGetValue(key, out var count);
         edges[key] = count + 1;
+    }
+
+    [Fact]
+    public void WriteBinaryStlProducesExpectedHeaderAndCounts()
+    {
+        var settings = new ProjectSettings(voxelsPerUnit: 1);
+        var project = new Project(settings);
+        var scene = project.NewScene();
+        scene.NewPart("cube", b => b.Box(new Int3(0, 0, 0), new Int3(2, 2, 2)));
+        var solid = scene.BuildSolid();
+        var mesh = VoxelFacesMesher.Build(solid);
+
+        using var stream = new MemoryStream();
+        Project.WriteBinaryStl(mesh, "cube", stream);
+
+        Assert.Equal(80 + 4 + mesh.F.Count * 50, stream.Length);
+
+        stream.Position = 0;
+        var header = new byte[80];
+        stream.Read(header, 0, header.Length);
+        var nameBytes = Encoding.ASCII.GetBytes("cube");
+        for (var i = 0; i < nameBytes.Length; i++)
+        {
+            Assert.Equal(nameBytes[i], header[i]);
+        }
+
+        var countBytes = new byte[4];
+        stream.Read(countBytes, 0, countBytes.Length);
+        var count = BitConverter.ToUInt32(countBytes, 0);
+        Assert.Equal((uint)mesh.F.Count, count);
     }
     private sealed class TempDir : IDisposable
     {

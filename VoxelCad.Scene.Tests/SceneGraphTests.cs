@@ -1,3 +1,5 @@
+using System;
+using System.IO;
 using SolidBuilder.Voxels;
 using System.Linq;
 using VoxelCad.Builder;
@@ -161,5 +163,162 @@ public class SceneGraphTests
 
         Assert.True(VoxelKernel.IsWatertight(strut.Model));
         Assert.Contains(strut.Model.Voxels, v => v.X > 4 && v.X < 12 && v.Y > 4 && v.Y < 12 && v.Z > 4 && v.Z < 12);
+    }
+
+    [Fact]
+    public void NewPartAddsInstanceByDefault()
+    {
+        var settings = new ProjectSettings(voxelsPerUnit: 2);
+        var scene = new Scene(settings);
+
+        var part = scene.NewPart("pillar", builder => builder.Box(new Int3(0, 0, 0), new Int3(1, 1, 2)));
+
+        var instance = Assert.Single(scene.Instances);
+        Assert.Equal(part, instance.Part);
+        Assert.Equal(Role.Solid, instance.Role);
+        Assert.Equal(16, VoxelKernel.GetVolume(part.Model));
+        Assert.True(VoxelKernel.IsWatertight(part.Model));
+    }
+
+    [Fact]
+    public void NewPartCanSkipInstanceAndRespectRole()
+    {
+        var settings = new ProjectSettings(voxelsPerUnit: 3);
+        var scene = new Scene(settings);
+
+        var part = scene.NewPart("void", builder => builder.Box(new Int3(0, 0, 0), new Int3(1, 1, 1)), Role.Hole, addInstance: false);
+
+        Assert.Empty(scene.Instances);
+        Assert.Equal(Role.Hole, part.DefaultRole);
+        Assert.Equal(27, VoxelKernel.GetVolume(part.Model));
+        Assert.True(VoxelKernel.IsWatertight(part.Model));
+    }
+
+    [Fact]
+    public void QualityPresetsIncreaseResolutionAndStayWatertight()
+    {
+        var settings = new ProjectSettings(voxelsPerUnit: 2);
+        var scene = new Scene(settings);
+
+        scene.NewPart("panel", builder =>
+        {
+            builder.Box(new Int3(0, 0, 0), new Int3(24, 24, 4));
+            builder.Subtract(inner =>
+            {
+                for (var x = 2; x < 22; x += 4)
+                {
+                    for (var y = 2; y < 22; y += 4)
+                    {
+                        inner.Box(new Int3(x, y, 0), new Int3(x + 1, y + 1, 1));
+                    }
+                }
+            });
+        });
+
+        var draft = scene.BakeForQuality(QualityProfile.Draft);
+        var medium = scene.BakeForQuality(QualityProfile.Medium);
+        var high = scene.BakeForQuality(QualityProfile.High);
+
+        Assert.True(VoxelKernel.IsWatertight(draft));
+        Assert.True(VoxelKernel.IsWatertight(medium));
+        Assert.True(VoxelKernel.IsWatertight(high));
+
+        Assert.True(VoxelKernel.GetVolume(medium) >= VoxelKernel.GetVolume(draft));
+        Assert.True(VoxelKernel.GetVolume(high) >= VoxelKernel.GetVolume(medium));
+    }
+
+    [Fact]
+    public void ExportPresetsProduceManifoldMeshes()
+    {
+        var settings = new ProjectSettings(voxelsPerUnit: 2);
+        var scene = new Scene(settings);
+
+        scene.NewPart("panel", builder =>
+        {
+            builder.Box(new Int3(0, 0, 0), new Int3(20, 20, 4));
+            builder.Subtract(inner =>
+            {
+                for (var x = 1; x < 19; x += 3)
+                {
+                    for (var y = 1; y < 19; y += 3)
+                    {
+                        inner.Box(new Int3(x, y, 0), new Int3(x + 1, y + 1, 1));
+                    }
+                }
+            });
+        });
+
+        using var temp = new TempDir();
+
+        void ValidateQuality(QualityProfile profile, double expectedQuantize)
+        {
+            var path = Path.Combine(temp.Path, $"quality_{profile}.stl");
+            scene.ExportStl(path, profile);
+
+            var solid = scene.BakeForQuality(profile);
+            var mesh = VoxelFacesMesher.Build(solid);
+            if (expectedQuantize > 0)
+            {
+                mesh = MeshOps.QuantizeAndWeld(mesh, expectedQuantize, settings);
+            }
+            MeshOps.EnsureOutwardNormals(mesh);
+            Assert.True(MeshValidation.IsClosedManifoldFuzzy(mesh, 1e-6));
+            Assert.True(MeshValidation.SignedVolume(mesh) > 0);
+
+            Assert.True(File.Exists(path));
+            Assert.True(new FileInfo(path).Length > 0);
+        }
+
+        ValidateQuality(QualityProfile.Draft, 0);
+        ValidateQuality(QualityProfile.Medium, 0.02);
+        ValidateQuality(QualityProfile.High, 0.01);
+    }
+
+    [Fact]
+    public void CustomQuantizeOverridesPreset()
+    {
+        var settings = new ProjectSettings(voxelsPerUnit: 2);
+        var scene = new Scene(settings);
+
+        scene.NewPart("panel", builder => builder.Box(new Int3(0, 0, 0), new Int3(12, 12, 3)));
+
+        var solid = scene.BakeForQuality(QualityProfile.High);
+        using var temp = new TempDir();
+        var path = Path.Combine(temp.Path, "custom.stl");
+
+        var customOptions = new ExportOptions { Quantize = QuantizeOptions.Units(0.03) };
+        scene.ExportStl(path, QualityProfile.High, customOptions);
+
+        var mesh = MeshOps.QuantizeAndWeld(VoxelFacesMesher.Build(solid), 0.03, settings);
+        MeshOps.EnsureOutwardNormals(mesh);
+        Assert.True(MeshValidation.IsClosedManifoldFuzzy(mesh, 1e-6));
+        Assert.True(MeshValidation.SignedVolume(mesh) > 0);
+        Assert.True(File.Exists(path));
+    }
+
+    private sealed class TempDir : IDisposable
+    {
+        public TempDir()
+        {
+            Path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"VoxelCad_{Guid.NewGuid():N}");
+            Directory.CreateDirectory(Path);
+        }
+
+        public string Path { get; }
+
+        public void Dispose()
+        {
+            try
+            {
+                if (Directory.Exists(Path))
+                {
+                    Directory.Delete(Path, recursive: true);
+                }
+            }
+            catch
+            {
+                // ignore cleanup failures
+            }
+        }
     }
 }

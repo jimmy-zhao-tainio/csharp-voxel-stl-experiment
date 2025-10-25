@@ -22,6 +22,136 @@ public sealed class Project
     {
         return new Scene(this);
     }
+
+    public void ExportStl(VoxelSolid solid, string path, ExportOptions? options = null)
+    {
+        if (solid is null) throw new ArgumentNullException(nameof(solid));
+        if (path is null) throw new ArgumentNullException(nameof(path));
+
+        var exportOptions = options ?? new ExportOptions();
+        var directory = Path.GetDirectoryName(path);
+        if (!string.IsNullOrEmpty(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        var name = Path.GetFileNameWithoutExtension(path);
+        var mesh = BuildMeshForExport(solid, exportOptions);
+        if (exportOptions.Quantize.StepUnits > 0)
+        {
+            mesh = MeshOps.QuantizeAndWeld(mesh, exportOptions.Quantize.StepUnits, Settings);
+        }
+
+        MeshOps.EnsureOutwardNormals(mesh);
+
+        using var stream = File.Open(path, FileMode.Create, FileAccess.Write, FileShare.None);
+        WriteBinaryStl(mesh, name, stream);
+    }
+
+    public void ExportStl(Scene scene, string path, QualityProfile? profile = null, ExportOptions? options = null)
+    {
+        if (scene is null) throw new ArgumentNullException(nameof(scene));
+        if (path is null) throw new ArgumentNullException(nameof(path));
+
+        var quality = profile ?? Settings.Quality;
+        var solid = scene.BakeForQuality(quality);
+
+        ExportOptions exportOptions;
+        if (options is null)
+        {
+            exportOptions = new ExportOptions();
+            switch (quality)
+            {
+                case QualityProfile.Medium:
+                    exportOptions.Quantize = QuantizeOptions.Units(0.02);
+                    break;
+                case QualityProfile.High:
+                    exportOptions.Quantize = QuantizeOptions.Units(0.01);
+                    break;
+            }
+        }
+        else
+        {
+            exportOptions = options;
+        }
+
+        ExportStl(solid, path, exportOptions);
+    }
+
+    private MeshD BuildMeshForExport(VoxelSolid solid, ExportOptions options)
+    {
+        return options.Engine switch
+        {
+            MeshEngine.SurfaceNets => SurfaceNetsExtractor.Extract(solid, options.IsoLevel),
+            _ => VoxelFacesMesher.Build(solid)
+        };
+    }
+
+    internal static void WriteBinaryStl(MeshD mesh, string name, Stream stream)
+    {
+        if (mesh is null) throw new ArgumentNullException(nameof(mesh));
+
+        using var writer = new BinaryWriter(stream, Encoding.ASCII, leaveOpen: true);
+        var header = new byte[80];
+        if (!string.IsNullOrEmpty(name))
+        {
+            var nameBytes = Encoding.ASCII.GetBytes(name);
+            Array.Copy(nameBytes, header, Math.Min(nameBytes.Length, header.Length));
+        }
+
+        writer.Write(header);
+        writer.Write((uint)mesh.F.Count);
+
+        foreach (var tri in mesh.F)
+        {
+            var p0 = mesh.V[tri.A];
+            var p1 = mesh.V[tri.B];
+            var p2 = mesh.V[tri.C];
+
+            var ux = p1.X - p0.X;
+            var uy = p1.Y - p0.Y;
+            var uz = p1.Z - p0.Z;
+            var vx = p2.X - p0.X;
+            var vy = p2.Y - p0.Y;
+            var vz = p2.Z - p0.Z;
+
+            var nx = uy * vz - uz * vy;
+            var ny = uz * vx - ux * vz;
+            var nz = ux * vy - uy * vx;
+            var length = Math.Sqrt(nx * nx + ny * ny + nz * nz);
+            if (length > 0)
+            {
+                var inv = 1.0 / length;
+                nx *= inv;
+                ny *= inv;
+                nz *= inv;
+            }
+            else
+            {
+                nx = ny = nz = 0;
+            }
+
+            writer.Write((float)nx);
+            writer.Write((float)ny);
+            writer.Write((float)nz);
+
+            writer.Write((float)p0.X);
+            writer.Write((float)p0.Y);
+            writer.Write((float)p0.Z);
+
+            writer.Write((float)p1.X);
+            writer.Write((float)p1.Y);
+            writer.Write((float)p1.Z);
+
+            writer.Write((float)p2.X);
+            writer.Write((float)p2.Y);
+            writer.Write((float)p2.Z);
+
+            writer.Write((ushort)0);
+        }
+
+        writer.Flush();
+    }
 }
 
 public sealed class Scene
@@ -126,7 +256,7 @@ public sealed class Scene
                 var mesh = VoxelFacesMesher.Build(solid);
                 MeshOps.EnsureOutwardNormals(mesh);
                 using var stream = File.Open(path, FileMode.Create, FileAccess.Write, FileShare.None);
-                WriteBinaryStl(mesh, name, stream);
+                Project.WriteBinaryStl(mesh, name, stream);
                 break;
             }
             case MeshEngine.SurfaceNets:
@@ -134,7 +264,7 @@ public sealed class Scene
                 var mesh = SurfaceNetsExtractor.Extract(solid, exportOptions.IsoLevel);
                 MeshOps.EnsureOutwardNormals(mesh);
                 using var stream = File.Open(path, FileMode.Create, FileAccess.Write, FileShare.None);
-                WriteBinaryStl(mesh, name, stream);
+                Project.WriteBinaryStl(mesh, name, stream);
                 break;
             }
             default:
@@ -142,70 +272,21 @@ public sealed class Scene
         }
     }
 
-    private static void WriteBinaryStl(MeshD mesh, string name, Stream stream)
+    public VoxelSolid BakeForQuality(QualityProfile profile)
     {
-        if (mesh is null) throw new ArgumentNullException(nameof(mesh));
+        var baseSolid = BuildSolid();
+        var vpu = _project.Settings.VoxelsPerUnit;
 
-        using var writer = new BinaryWriter(stream, Encoding.ASCII, leaveOpen: true);
-        var header = new byte[80];
-        if (!string.IsNullOrEmpty(name))
+        return profile switch
         {
-            var nameBytes = Encoding.ASCII.GetBytes(name);
-            Array.Copy(nameBytes, header, Math.Min(nameBytes.Length, header.Length));
-        }
-
-        writer.Write(header);
-        writer.Write((uint)mesh.F.Count);
-
-        foreach (var tri in mesh.F)
-        {
-            var p0 = mesh.V[tri.A];
-            var p1 = mesh.V[tri.B];
-            var p2 = mesh.V[tri.C];
-
-            var ux = p1.X - p0.X;
-            var uy = p1.Y - p0.Y;
-            var uz = p1.Z - p0.Z;
-            var vx = p2.X - p0.X;
-            var vy = p2.Y - p0.Y;
-            var vz = p2.Z - p0.Z;
-
-            var nx = uy * vz - uz * vy;
-            var ny = uz * vx - ux * vz;
-            var nz = ux * vy - uy * vx;
-            var length = Math.Sqrt(nx * nx + ny * ny + nz * nz);
-            if (length > 0)
-            {
-                var inv = 1.0 / length;
-                nx *= inv;
-                ny *= inv;
-                nz *= inv;
-            }
-            else
-            {
-                nx = ny = nz = 0;
-            }
-
-            writer.Write((float)nx);
-            writer.Write((float)ny);
-            writer.Write((float)nz);
-
-            writer.Write((float)p0.X);
-            writer.Write((float)p0.Y);
-            writer.Write((float)p0.Z);
-
-            writer.Write((float)p1.X);
-            writer.Write((float)p1.Y);
-            writer.Write((float)p1.Z);
-
-            writer.Write((float)p2.X);
-            writer.Write((float)p2.Y);
-            writer.Write((float)p2.Z);
-
-            writer.Write((ushort)0);
-        }
-
-        writer.Flush();
+            QualityProfile.Draft => baseSolid,
+            QualityProfile.Medium => VoxelKernel.Close(ScaleSolid(baseSolid, 2), 1, VoxelKernel.Metric.LInf),
+            QualityProfile.High => VoxelKernel.Open(
+                VoxelKernel.Close(ScaleSolid(baseSolid, 3), 1, VoxelKernel.Metric.LInf),
+                1,
+                VoxelKernel.Metric.LInf),
+            _ => baseSolid
+        };
     }
 
     public VoxelSolid BuildSolid()
@@ -229,6 +310,43 @@ public sealed class Scene
         return result;
     }
 
+    private static VoxelSolid ScaleSolid(VoxelSolid source, int scale)
+    {
+        if (source is null) throw new ArgumentNullException(nameof(source));
+
+        if (scale <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(scale), "Scale must be positive.");
+        }
+
+        if (scale == 1)
+        {
+            var clone = VoxelKernel.CreateEmpty();
+            VoxelKernel.AddVoxels(clone, source.Voxels);
+            return clone;
+        }
+
+        var result = VoxelKernel.CreateEmpty();
+        foreach (var voxel in source.Voxels)
+        {
+            var baseX = voxel.X * scale;
+            var baseY = voxel.Y * scale;
+            var baseZ = voxel.Z * scale;
+
+            for (var dx = 0; dx < scale; dx++)
+            {
+                for (var dy = 0; dy < scale; dy++)
+                {
+                    for (var dz = 0; dz < scale; dz++)
+                    {
+                        VoxelKernel.AddVoxel(result, new Int3(baseX + dx, baseY + dy, baseZ + dz));
+                    }
+                }
+            }
+        }
+
+        return result;
+    }
     private static CompressionLevel MapCompressionLevel(int level)
     {
         if (level <= 1)
@@ -503,6 +621,9 @@ public sealed class UnitBuilder
     private Int3 Scale(Int3 value) => new(value.X * _scale, value.Y * _scale, value.Z * _scale);
     private int Scale(int value) => value * _scale;
 }
+
+
+
 
 
 

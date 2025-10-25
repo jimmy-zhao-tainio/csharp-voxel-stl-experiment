@@ -22,6 +22,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\VoxelCad.Scene\VoxelCad.Scene.csproj" />
+    <ProjectReference Include="..\VoxelCad.Core\VoxelCad.Core.csproj" />
     <ProjectReference Include="..\SolidBuilder.Voxels\SolidBuilder.Voxels.csproj" />
   </ItemGroup>
 

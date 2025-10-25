@@ -119,7 +119,7 @@ public sealed class ProjectSettings
         Units units = Units.Millimeters,
         int voxelsPerUnit = 1,
         RevoxelizationSettings? revoxelization = null,
-        QualityProfile exportQuality = QualityProfile.Medium)
+        QualityProfile quality = QualityProfile.Draft)
     {
         if (voxelsPerUnit <= 0)
         {
@@ -129,11 +129,13 @@ public sealed class ProjectSettings
         Units = units;
         VoxelsPerUnit = voxelsPerUnit;
         Revoxelization = revoxelization ?? RevoxelizationSettings.Default;
-        ExportQuality = exportQuality;
+        Quality = quality;
     }
 
     public Units Units { get; }
     public int VoxelsPerUnit { get; }
     public RevoxelizationSettings Revoxelization { get; }
-    public QualityProfile ExportQuality { get; }
+    public QualityProfile Quality { get; set; } = QualityProfile.Draft;
 }
+
+

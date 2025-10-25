@@ -288,10 +288,12 @@ public sealed class Scene
     public Scene(ProjectSettings settings)
     {
         Settings = settings ?? throw new ArgumentNullException(nameof(settings));
+        Project = new Project(Settings);
     }
 
     public IReadOnlyList<Instance> Instances => _instances;
     public ProjectSettings Settings { get; }
+    public Project Project { get; }
 
     public Instance AddInstance(Part part, Role role = Role.Solid)
     {
@@ -306,6 +308,30 @@ public sealed class Scene
         return instance;
     }
 
+    public Part NewPart(string name, Action<UnitBuilder> build, Role role = Role.Solid, bool addInstance = true)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            throw new ArgumentException("Part name cannot be null or whitespace.", nameof(name));
+        }
+
+        if (build is null)
+        {
+            throw new ArgumentNullException(nameof(build));
+        }
+
+        var coreScene = Project.NewScene();
+        var built = coreScene.NewPart(name, build, MapRole(role));
+        var part = RegisterPart(built.Name, built.Solid, role);
+
+        if (addInstance)
+        {
+            AddInstance(part, role);
+        }
+
+        return part;
+    }
+
     public bool RemoveInstance(Instance instance)
     {
         if (instance is null) throw new ArgumentNullException(nameof(instance));
@@ -317,6 +343,15 @@ public sealed class Scene
         var part = new Part(name, solid, defaultRole);
         _parts.Add(part);
         return part;
+    }
+
+    private static PartRole MapRole(Role role)
+    {
+        return role switch
+        {
+            Role.Solid => PartRole.Solid,
+            _ => PartRole.Subtractive
+        };
     }
 
     public VoxelSolid Bake(BakeOptions? options = null)
@@ -375,14 +410,62 @@ public sealed class Scene
 
     public VoxelSolid MorphOpen(int radius, Metric metric = Metric.LInf)
     {
-        var baked = Bake();
-        return VoxelKernel.Open(baked, radius, ToKernelMetric(metric));
+        return MorphOpen(radius, metric, Bake());
+    }
+
+    public VoxelSolid MorphOpen(int radius, Metric metric, VoxelSolid source)
+    {
+        if (source is null) throw new ArgumentNullException(nameof(source));
+        return VoxelKernel.Open(source, radius, ToKernelMetric(metric));
     }
 
     public VoxelSolid MorphClose(int radius, Metric metric = Metric.LInf)
     {
-        var baked = Bake();
-        return VoxelKernel.Close(baked, radius, ToKernelMetric(metric));
+        return MorphClose(radius, metric, Bake());
+    }
+
+    public VoxelSolid MorphClose(int radius, Metric metric, VoxelSolid source)
+    {
+        if (source is null) throw new ArgumentNullException(nameof(source));
+        return VoxelKernel.Close(source, radius, ToKernelMetric(metric));
+    }
+
+    public VoxelSolid BakeForQuality(QualityProfile profile)
+    {
+        var vpu = Settings.VoxelsPerUnit;
+        return profile switch
+        {
+            QualityProfile.Draft => Bake(),
+            QualityProfile.Medium => MorphClose(1, Metric.LInf, BakeAtResolution(vpu * 2)),
+            QualityProfile.High =>
+                MorphOpen(1, Metric.LInf,
+                    MorphClose(1, Metric.LInf, BakeAtResolution(vpu * 3))),
+            _ => Bake()
+        };
+    }
+
+    public void ExportStl(string path, QualityProfile? profile = null, ExportOptions? options = null)
+    {
+        if (path is null) throw new ArgumentNullException(nameof(path));
+
+        var quality = profile ?? Settings.Quality;
+        var solid = BakeForQuality(quality);
+        var exportOptions = options ?? new ExportOptions();
+
+        if (options is null)
+        {
+            switch (quality)
+            {
+                case QualityProfile.Medium:
+                    exportOptions.Quantize = QuantizeOptions.Units(0.02);
+                    break;
+                case QualityProfile.High:
+                    exportOptions.Quantize = QuantizeOptions.Units(0.01);
+                    break;
+            }
+        }
+
+        Project.ExportStl(solid, path, exportOptions);
     }
 
     private static VoxelKernel.Metric ToKernelMetric(Metric metric)
