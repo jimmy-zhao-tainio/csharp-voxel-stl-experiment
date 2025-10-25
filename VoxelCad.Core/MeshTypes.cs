@@ -2,7 +2,7 @@ using System.Collections.Generic;
 
 namespace VoxelCad.Core;
 
-internal struct VertexD
+public struct VertexD
 {
     public double X;
     public double Y;
@@ -16,7 +16,7 @@ internal struct VertexD
     }
 }
 
-internal struct TriIdx
+public struct TriIdx
 {
     public int A;
     public int B;
@@ -30,7 +30,7 @@ internal struct TriIdx
     }
 }
 
-internal sealed class MeshD
+public sealed class MeshD
 {
     public List<VertexD> V = new();
     public List<TriIdx> F = new();
