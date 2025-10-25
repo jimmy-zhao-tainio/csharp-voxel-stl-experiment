@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -122,14 +122,17 @@ public sealed class Scene
         switch (exportOptions.Engine)
         {
             case MeshEngine.VoxelFaces:
-                using (var stream = File.Open(path, FileMode.Create, FileAccess.Write, FileShare.None))
-                {
-                    VoxelKernel.WriteBinaryStl(solid, name, stream);
-                }
+            {
+                var mesh = VoxelFacesMesher.Build(solid);
+                MeshOps.EnsureOutwardNormals(mesh);
+                using var stream = File.Open(path, FileMode.Create, FileAccess.Write, FileShare.None);
+                WriteBinaryStl(mesh, name, stream);
                 break;
+            }
             case MeshEngine.SurfaceNets:
             {
                 var mesh = SurfaceNetsExtractor.Extract(solid, exportOptions.IsoLevel);
+                MeshOps.EnsureOutwardNormals(mesh);
                 using var stream = File.Open(path, FileMode.Create, FileAccess.Write, FileShare.None);
                 WriteBinaryStl(mesh, name, stream);
                 break;
@@ -500,3 +503,6 @@ public sealed class UnitBuilder
     private Int3 Scale(Int3 value) => new(value.X * _scale, value.Y * _scale, value.Z * _scale);
     private int Scale(int value) => value * _scale;
 }
+
+
+

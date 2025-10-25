@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using SolidBuilder.Voxels;
 using VoxelCad.Core;
@@ -135,6 +135,31 @@ public class CoreSceneTests
         Assert.True(triangles.Count <= naiveTriangles / 2);
     }
 
+    [Fact]
+    public void EnsureOutwardNormalsFlipsNegativeVolume()
+    {
+        var solid = VoxelKernel.CreateEmpty();
+        VoxelKernel.AddBox(solid, new Int3(0, 0, 0), new Int3(4, 4, 4));
+
+        var mesh = VoxelFacesMesher.Build(solid);
+
+        for (var i = 0; i < mesh.F.Count; i++)
+        {
+            var tri = mesh.F[i];
+            (tri.B, tri.C) = (tri.C, tri.B);
+            mesh.F[i] = tri;
+        }
+
+        var invertedVolume = MeshValidation.SignedVolume(mesh);
+        Assert.True(invertedVolume < 0);
+
+        MeshOps.EnsureOutwardNormals(mesh);
+
+        var correctedVolume = MeshValidation.SignedVolume(mesh);
+        Assert.True(correctedVolume > 0);
+        Assert.True(MeshValidation.IsClosedManifold(mesh), DescribeMeshIssues(mesh));
+    }
+
     private static string DescribeMeshIssues(MeshD mesh)
     {
         var degenerates = new List<int>();
@@ -234,3 +259,4 @@ public class CoreSceneTests
         }
     }
 }
+
